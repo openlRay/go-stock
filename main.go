@@ -221,8 +221,8 @@ func main() {
 				UseToolbar:                 true,
 			},
 			Appearance:           mac.NSAppearanceNameDarkAqua,
-			WebviewIsTransparent: true,
-			WindowIsTranslucent:  true,
+			WebviewIsTransparent: false,
+			WindowIsTranslucent:  false,
 			About: &mac.AboutInfo{
 				Title:   "go-stock",
 				Message: "go-stock：AI赋能股票分析✨ ",
