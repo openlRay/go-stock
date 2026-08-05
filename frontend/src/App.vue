@@ -37,6 +37,7 @@ import {Prompt, ReportAnalytics, ReportMoney, ReportSearch, TrendingUp} from "@v
 import {LocalFireDepartmentRound} from "@vicons/material";
 import {AppsList20Regular, BoxSearch20Regular,SlideHide24Filled, CommentNote20Filled} from "@vicons/fluent";
 import {FireFilled, MoneyCollectOutlined, NotificationFilled, StockOutlined} from "@vicons/antd";
+import {isWebMode} from "./runtime-env";
 
 
 
@@ -996,6 +997,7 @@ const menuOptions = ref([
     }, {default: () => '隐藏至托盘区'}),
     key: 'hide',
     icon: renderIcon(SlideHide24Filled),
+    show: !isWebMode,
   },
   {
     label: () => h("a", {
@@ -1004,6 +1006,7 @@ const menuOptions = ref([
     }, {default: () => '退出程序'}),
     key: 'exit',
     icon: renderIcon(PowerOutline),
+    show: !isWebMode,
   },
 ])
 

@@ -17,8 +17,9 @@ import {
 } from "../../wailsjs/go/main/App";
 import {NTag, NTooltip, NIcon, useMessage} from "naive-ui";
 import {data, models} from "../../wailsjs/go/models";
-import {EventsEmit} from "../../wailsjs/runtime";
+import {EventsEmit, WindowReloadApp} from "../../wailsjs/runtime";
 import {HelpCircleFilledIcon, HelpIcon} from "tdesign-icons-vue-next";
+import {isWebMode} from "../runtime-env";
 
 const message = useMessage()
 const router = useRouter()
@@ -210,10 +211,15 @@ function saveConfig() {
   return UpdateConfig(config).then(res => {
     if (res === '保存成功！') {
       message.success(res)
+      EventsEmit("updateSettings", config);
+      // 桌面端由 Go 监听 updateSettings 后 WindowReloadApp；
+      // Web 模式无该监听，需在前端主动刷新以应用主题等设置。
+      if (isWebMode) {
+        WindowReloadApp()
+      }
     } else {
       message.error(res)
     }
-    EventsEmit("updateSettings", config);
   })
 }
 
