@@ -26,11 +26,13 @@ Docker build arguments:
 ```text
 NODE_IMAGE=node:22-bookworm-slim
 GO_IMAGE=golang:1.26-bookworm
+GOPROXY=https://proxy.golang.org,direct
+GOSUMDB=sum.golang.org
 RUNTIME_IMAGE=debian:bookworm-slim
 DEBIAN_MIRROR=https://mirrors.aliyun.com
 ```
 
-These are the Dockerfile defaults. `compose.yaml` defaults the three base images to their version-equivalent DaoCloud paths for domestic builds and exposes all four values through environment-variable interpolation so users can switch registries without editing the file.
+These are the Dockerfile defaults. `compose.yaml` defaults the three base images to their version-equivalent DaoCloud paths and `GOPROXY` to `https://goproxy.cn` for domestic builds. It exposes all six values through environment-variable interpolation so users can switch registries and Go module proxies without editing the file.
 
 The frontend build must keep `NODE_OPTIONS=--max-old-space-size=4096`; the current bundle transforms more than 36,000 modules and exceeds Node's default heap in a clean Docker build.
 
@@ -92,6 +94,7 @@ RPC request and response:
 - Docker persists whole directories at `/app/data`, `/app/skills`, and `/app/logs`. Persist the complete data directory so SQLite WAL and SHM files stay with `stock.db`.
 - The runtime image runs as `go-stock:go-stock` (UID/GID `10001`) and all three mounted directories must be writable by that identity.
 - The image build arguments may point to compatible registry or Debian mirrors when the official upstream is unavailable; changing them must not change the Node 22, Go 1.26, or Debian bookworm runtime contract.
+- The Compose `GOPROXY` default intentionally omits `direct`; a missing module must fail through the proxy instead of falling back to an unreachable GitHub connection until the deployment timeout. Keep `GOSUMDB` enabled.
 - Web mode is single-user, has no application login, and supports one process writing the SQLite volume.
 
 ### 4. Validation & Error Matrix
@@ -111,6 +114,8 @@ RPC request and response:
 | One SSE client is slow or disconnects | Do not block emitters or panic; other clients continue |
 | Docker process receives SIGTERM | Stop HTTP/cron resources within the shutdown timeout |
 | Docker frontend build uses the default Node heap | May OOM while transforming the production bundle; build with the declared 4 GB heap option |
+| `go mod download` cannot reach the configured proxy | Override `GOPROXY` with a reachable Go module proxy; do not disable checksum verification |
+| A restricted build uses `GOPROXY=...,direct` and the proxy misses | The Go command may stall on direct GitHub access; omit `direct` in that environment |
 | Mounted volume is not writable by UID 10001 | Fail deployment validation before relying on persistence; do not run the application as root to mask ownership errors |
 
 ### 5. Good / Base / Bad Cases
@@ -134,7 +139,7 @@ RPC request and response:
 - `./scripts/dev-web.sh`: assert ports `5173` and `18888` become ready, `/api/health`, RPC, and SSE work through port `5173`, a Vue source edit is applied by HMR, and `Ctrl+C` releases both ports.
 - Browser path resolver tests: assert configured path wins over the environment, an existing `CHROME_BIN` wins over platform detection, and repeated empty-path resolution invokes platform detection once.
 - HTTP smoke: assert health, one RPC call, SPA fallback, cross-origin `403`, and graceful SIGTERM.
-- Docker smoke when the daemon is available: build, wait for health, assert UID `10001` and all three mount paths are writable, write SQLite config/skill/log markers, recreate the container without deleting volumes, and assert all markers remain.
+- Docker smoke when the daemon is available: assert `docker compose config` resolves `GOPROXY`/`GOSUMDB`, build, wait for health, assert UID `10001` and all three mount paths are writable, write SQLite config/skill/log markers, recreate the container without deleting volumes, and assert all markers remain.
 
 ### 7. Wrong vs Correct
 
@@ -201,3 +206,19 @@ settings.BrowserPath = resolveBrowserPath(settings.BrowserPath)
 ```
 
 Use the shared process-level resolver for settings, browser pools, and chromedp cookie acquisition.
+
+#### Wrong
+
+```bash
+GOPROXY=https://goproxy.cn,direct docker compose build
+```
+
+In a build environment that cannot reach GitHub, a proxy miss falls back to a direct VCS connection and can consume the entire deployment timeout.
+
+#### Correct
+
+```bash
+GOPROXY=https://goproxy.cn docker compose build
+```
+
+Use a reachable proxy without `direct` in restricted networks, and keep `GOSUMDB` enabled.

@@ -84,7 +84,7 @@
 
 ### 🐳 Docker Web 版
 
-需要 Docker Engine 和 Docker Compose v2。Compose 默认使用 DaoCloud 的 Node、Go、Debian 基础镜像和 Aliyun APT mirror，首次构建建议为 Docker 分配至少 4 GB 内存：
+需要 Docker Engine 和 Docker Compose v2。Compose 默认使用 DaoCloud 的 Node、Go、Debian 基础镜像、Aliyun APT mirror 和 `goproxy.cn` Go modules 代理，首次构建建议为 Docker 分配至少 4 GB 内存：
 
 ```bash
 docker compose build
@@ -99,6 +99,8 @@ docker compose ps
 ```bash
 NODE_IMAGE=node:22-bookworm-slim \
 GO_IMAGE=golang:1.26-bookworm \
+GOPROXY=https://proxy.golang.org,direct \
+GOSUMDB=sum.golang.org \
 RUNTIME_IMAGE=debian:bookworm-slim \
 DEBIAN_MIRROR=https://deb.debian.org \
 docker compose build

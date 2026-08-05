@@ -20,23 +20,31 @@ GO_STOCK_WEB_PORT=28888 docker compose up -d
 
 容器以非 root 用户运行，默认时区为 `Asia/Shanghai`。镜像内包含 Chromium 和中文字体，供 Web 抓取功能使用。
 
-通过 Compose 构建时，默认使用 DaoCloud 的 Node、Go、Debian 基础镜像和 Aliyun 的 Debian HTTPS mirror，并继续校验 Debian 软件包签名。需要全部切换回官方源时可执行：
+通过 Compose 构建时，默认使用 DaoCloud 的 Node、Go、Debian 基础镜像、Aliyun 的 Debian HTTPS mirror 和 `https://goproxy.cn` Go modules 代理，并继续校验 Debian 软件包和 Go modules。国内 Go proxy 默认不回退 `direct`，避免受限网络再次连接 GitHub 并长时间阻塞。需要全部切换回官方源时可执行：
 
 ```bash
 NODE_IMAGE=node:22-bookworm-slim \
 GO_IMAGE=golang:1.26-bookworm \
+GOPROXY=https://proxy.golang.org,direct \
+GOSUMDB=sum.golang.org \
 RUNTIME_IMAGE=debian:bookworm-slim \
 DEBIAN_MIRROR=https://deb.debian.org \
 docker compose build
 ```
 
-也可以通过同名环境变量只替换其中一个构建源；例如只替换 Go builder：
+也可以通过同名环境变量只替换其中一个构建源；例如只替换 Go builder 基础镜像：
 
 ```bash
 GO_IMAGE=golang:1.26-bookworm docker compose build
 ```
 
-这些参数也可以写入仓库根目录的本地 `.env` 文件。无论使用哪个 registry，基础镜像版本仍应保持 Node 22、Go 1.26 和 Debian bookworm slim。
+如果构建环境有自己的 Go modules proxy，可以单独覆盖：
+
+```bash
+GOPROXY=https://your-go-proxy.example.com docker compose build
+```
+
+这些参数也可以写入仓库根目录的本地 `.env` 文件。无论使用哪个 registry，基础镜像版本仍应保持 Node 22、Go 1.26 和 Debian bookworm slim；不要把 `GOSUMDB` 设置为 `off` 来绕过依赖校验。
 
 ## 数据持久化
 

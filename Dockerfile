@@ -17,6 +17,12 @@ RUN NODE_OPTIONS=--max-old-space-size=4096 npm run build
 
 FROM ${GO_IMAGE} AS go-builder
 
+ARG GOPROXY=https://proxy.golang.org,direct
+ARG GOSUMDB=sum.golang.org
+
+ENV GOPROXY=${GOPROXY} \
+    GOSUMDB=${GOSUMDB}
+
 WORKDIR /src
 
 COPY go.mod go.sum ./
