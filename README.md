@@ -82,6 +82,66 @@
 
 [//]: # (- MACOS安装版：[go-stock-darwin-universal.pkg]&#40;https://github.com/ArvinLovegood/go-stock/releases&#41;)
 
+### 🐳 Docker Web 版
+
+需要 Docker Engine 和 Docker Compose v2。Compose 默认使用 DaoCloud 的 Node、Go、Debian 基础镜像和 Aliyun APT mirror，首次构建建议为 Docker 分配至少 4 GB 内存：
+
+```bash
+docker compose build
+docker compose up -d
+docker compose ps
+```
+
+浏览器访问 <http://127.0.0.1:18888>。停止服务使用 `docker compose down`，该命令不会删除 `go-stock-data`、`go-stock-skills` 和 `go-stock-logs` volumes。
+
+需要切回官方源时执行：
+
+```bash
+NODE_IMAGE=node:22-bookworm-slim \
+GO_IMAGE=golang:1.26-bookworm \
+RUNTIME_IMAGE=debian:bookworm-slim \
+DEBIAN_MIRROR=https://deb.debian.org \
+docker compose build
+```
+
+Web 版没有应用登录，请勿直接暴露到公网。端口、持久化、升级和备份说明见 [Docker 部署指南](docs/Docker部署指南.md)。
+
+### 🧑‍💻 本地源码启动
+
+开发环境需要 Go 1.26、Node.js 22 和 npm。
+
+#### 启动 Desktop 版
+
+Desktop 版需要先安装 Wails v2：
+
+```bash
+go install github.com/wailsapp/wails/v2/cmd/wails@v2.11.0
+wails dev
+```
+
+#### 启动 Web 版
+
+macOS / Linux 在仓库根目录执行一条命令：
+
+```bash
+./scripts/dev-web.sh
+```
+
+脚本会同时启动：
+
+- Go Web 后端：`http://127.0.0.1:18888`
+- Vite 开发前端：<http://127.0.0.1:5173>
+
+开发时请始终访问 <http://127.0.0.1:5173>。修改 `frontend/src` 下的 Vue 代码后，Vite 会自动热更新，不需要重新 build 或重启；修改 Go 代码后，按 `Ctrl+C` 停止，再重新执行脚本。首次运行会自动安装前端依赖，并生成一次 Go 编译所需的 `frontend/dist`。
+
+按 `Ctrl+C` 会同时停止前端和后端。本地 Web 版的数据直接写入仓库下的 `data`、`skills` 和 `logs` 目录，不使用 Docker volumes。
+
+如果修改了 `frontend/package.json` 或 `frontend/package-lock.json`，先更新依赖再重新启动：
+
+```bash
+npm --prefix frontend ci
+```
+
 
 ### 💬 支持大模型/平台
 | 模型 | 状态 | 备注                                                                                                                                                                                                                                                                |
@@ -103,12 +163,8 @@
 
 
 ### 支持开源💕计划
-| 赞助计划	                           | 赞助等级	          | 权益说明                                                   |
-|:--------------------------------|----------------|:-------------------------------------------------------|
-| 每月 0 RMB	                       | vip0	          | 🌟 全部功能,软件自动更新(从GitHub下载),自行解决github平台网络问题。            |
-| 每月赞助 18.8 RMB<br>每年赞助 120 RMB		 | vip1	          | 💕 全部功能,软件自动更新(从CDN下载),更新快速便捷。AI配置指导，提示词参考等            |
-| 每月赞助 28.8 RMB<br>每年赞助 240 RMB		 | vip2	          | 💕 vip1全部功能,启动时自动同步最近24小时市场资讯(包括外媒简讯)，go-stock Ai助手等   |
-| 每月赞助 X RMB			                   | vipX	          | 🧩 更多计划，视go-stock开源项目发展情况而定...(承接GitHub项目README广告推广💖) |
+
+go-stock 的本地功能对所有用户完整开放，不设置 VIP 等级或赞助码门禁。赞助仅用于支持项目持续维护，不影响软件功能、更新、市场资讯、AI 助手或 K 线能力。
 
 ## 🧩 重大功能开发计划
 | 功能说明            | 状态 | 备注                                                                                                       |
@@ -267,4 +323,3 @@
 
 ## License
 [GNU GPLv3](LICENSE)
-

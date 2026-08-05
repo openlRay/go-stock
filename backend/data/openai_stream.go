@@ -17,7 +17,6 @@ import (
 	"github.com/duke-git/lancet/v2/random"
 	"github.com/duke-git/lancet/v2/strutil"
 	"github.com/tidwall/gjson"
-	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 func (o *OpenAi) NewSummaryStockNewsStreamWithTools(userQuestion string, sysPromptId *int, tools []Tool, thinking bool, history []map[string]interface{}) <-chan map[string]any {
@@ -501,7 +500,7 @@ func (o *OpenAi) NewChatStream(stock, stockCode, userQuestion string, sysPromptI
 					"question":     question,
 					"extraContent": "***❗获取股票价格失败,分析结果可能不准确***<hr>",
 				}
-				go runtime.EventsEmit(o.ctx, "warnMsg", "❗获取股票价格失败,分析结果可能不准确")
+				go EmitAppEvent("warnMsg", "❗获取股票价格失败,分析结果可能不准确")
 				return
 			}
 			price := ""
@@ -536,7 +535,7 @@ func (o *OpenAi) NewChatStream(stock, stockCode, userQuestion string, sysPromptI
 					"question":     question,
 					"extraContent": "***❗获取股票财报失败,分析结果可能不准确***<hr>",
 				}
-				go runtime.EventsEmit(o.ctx, "warnMsg", "❗获取股票财报失败,分析结果可能不准确")
+				go EmitAppEvent("warnMsg", "❗获取股票财报失败,分析结果可能不准确")
 				return
 			}
 			msg = append(msg, map[string]interface{}{

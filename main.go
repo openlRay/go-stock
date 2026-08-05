@@ -64,7 +64,7 @@ var VersionCommit string
 var OFFICIAL_STATEMENT string
 var BuildKey string
 
-func main() {
+func runDesktop() {
 	defer func() {
 		if r := recover(); r != nil {
 			log.SugaredLogger.Error("panic: ", r)
@@ -74,7 +74,6 @@ func main() {
 
 	checkDir("data")
 	machineid.Init(BuildKey)
-	data.SponsorDecryptKeyHex = BuildKey
 	data.SetAppIcon(icon)
 	db.Init("")
 	data.InitAnalyzeSentiment()

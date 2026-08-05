@@ -1,6 +1,6 @@
 <script setup>
 import {computed, h, onBeforeMount, onMounted, ref, reactive} from 'vue'
-import {GetConfig, GetSponsorInfo, GetMachineId, CheckDeviceBinding, QuitApp, GetEffectiveSponsorVip, AddPromptTemplate, PromptPlazaRequest} from "../../wailsjs/go/main/App";
+import {GetConfig, CheckDeviceBinding, QuitApp, AddPromptTemplate, PromptPlazaRequest} from "../../wailsjs/go/main/App";
 import {useMessage, useDialog} from "naive-ui";
 import {MdPreview, MdEditor} from 'md-editor-v3'
 import 'md-editor-v3/lib/preview.css'
@@ -18,7 +18,6 @@ const currentUser = ref(null)
 const categories = ref([])
 const activeCategory = ref(null)
 const activeSort = ref('latest')
-const vipOnlyFilter = ref(false)
 const keyword = ref('')
 const loading = ref(false)
 const prompts = ref([])
@@ -56,8 +55,7 @@ const createModal = reactive({
   description: '',
   category: '',
   tags: '',
-  isPublic: true,
-  vipOnly: false
+  isPublic: true
 })
 
 const rankingModal = reactive({
@@ -77,12 +75,10 @@ const editModal = reactive({
   category: '',
   tags: '',
   isPublic: true,
-  vipOnly: false,
   loading: false
 })
 
 const isLoggedIn = computed(() => !!token.value)
-const vipRequireLogin = ref(false)
 
 onBeforeMount(() => {
   GetConfig().then(result => {
@@ -101,8 +97,6 @@ onMounted(() => {
   loadPrompts()
   if (token.value) {
     fetchCurrentUser()
-  } else {
-    checkVipAndPromptLogin()
   }
 })
 
@@ -161,7 +155,6 @@ async function loadPrompts() {
     if (activeCategory.value) params.category = activeCategory.value
     if (keyword.value) params.keyword = keyword.value
     params.sort = activeSort.value
-    if (vipOnlyFilter.value) params.vipOnly = 'true'
     const data = await apiGet('/prompts', params)
     prompts.value = data.list || []
     pagination.itemCount = data.total || 0
@@ -177,26 +170,11 @@ async function fetchCurrentUser() {
   try {
     const data = await apiGet('/user/me')
     currentUser.value = data
-    syncVipInfo()
     checkDeviceLimit()
   } catch (e) {
     token.value = ''
     localStorage.removeItem('promptPlazaToken')
     currentUser.value = null
-  }
-}
-
-async function checkVipAndPromptLogin() {
-  try {
-    const vipInfo = await GetEffectiveSponsorVip()
-    if (vipInfo && vipInfo.vipLevel > 0 && vipInfo.active) {
-      vipRequireLogin.value = true
-      loginModal.show = true
-      loginModal.tab = 'login'
-      message.info('VIP用户请登录，解锁专属提示词与更多权益')
-    }
-  } catch (e) {
-    console.warn('检查VIP状态失败', e)
   }
 }
 
@@ -232,43 +210,6 @@ async function checkDeviceLimit() {
   }
 }
 
-async function syncVipInfo() {
-  if (!token.value) return
-  try {
-    const sponsorInfo = await GetSponsorInfo()
-    const vipLevel = sponsorInfo?.vipLevel ? Number(sponsorInfo.vipLevel) : 0
-    const vipExpireAt = sponsorInfo?.vipEndTime || ''
-    let uuid = ''
-    try {
-      uuid = await GetMachineId()
-    } catch (e) {
-      console.warn('获取机器ID失败', e)
-    }
-    const body = {vipLevel, uuid}
-    if (vipLevel > 0 && vipExpireAt) {
-      const d = new Date(vipExpireAt.replace(' ', 'T'))
-      body.vipExpireAt = d.toISOString()
-    } else {
-      body.vipExpireAt = ''
-    }
-    try {
-      const config = await GetConfig()
-      if (config?.sponsorCode) {
-        body.sponsorCode = config.sponsorCode
-      }
-    } catch (e) {
-      console.warn('获取赞助码失败', e)
-    }
-    await apiPost('/user/vip', body)
-    if (currentUser.value) {
-      currentUser.value.vipLevel = vipLevel
-      currentUser.value.vipExpireAt = vipExpireAt
-    }
-  } catch (e) {
-    console.warn('同步VIP信息失败', e)
-  }
-}
-
 async function handleLogin() {
   try {
     const data = await apiPost('/auth/login', {
@@ -281,9 +222,7 @@ async function handleLogin() {
     localStorage.setItem('promptPlazaPassword', loginModal.password)
     currentUser.value = data.user
     loginModal.show = false
-    vipRequireLogin.value = false
     message.success('登录成功')
-    syncVipInfo()
     checkDeviceLimit()
     loadPrompts()
   } catch (e) {
@@ -304,12 +243,10 @@ async function handleRegister() {
     localStorage.setItem('promptPlazaPassword', loginModal.password)
     currentUser.value = data.user
     loginModal.show = false
-    vipRequireLogin.value = false
     loginModal.username = ''
     loginModal.password = ''
     loginModal.nickname = ''
     message.success('注册成功')
-    syncVipInfo()
     checkDeviceLimit()
     loadPrompts()
   } catch (e) {
@@ -461,13 +398,6 @@ async function handleCopyContent(content) {
 }
 
 async function addPromptToTemplate(prompt) {
-  if (prompt.needVip) {
-    const vipInfo = await GetEffectiveSponsorVip()
-    if (!vipInfo || vipInfo.vipLevel <= 0 || !vipInfo.active) {
-      message.warning('该提示词为VIP专属，请先开通VIP')
-      return
-    }
-  }
   try {
     const res = await AddPromptTemplate({
       name: prompt.title,
@@ -538,7 +468,6 @@ function showEditModal(prompt) {
   editModal.category = prompt.category || ''
   editModal.tags = prompt.tags || ''
   editModal.isPublic = prompt.isPublic !== false
-  editModal.vipOnly = prompt.vipOnly === true
   editModal.show = true
 }
 
@@ -556,7 +485,7 @@ async function handleEdit() {
       category: editModal.category,
       tags: editModal.tags,
       isPublic: editModal.isPublic,
-      vipOnly: editModal.vipOnly
+      vipOnly: false
     })
     editModal.show = false
     detailModal.show = false
@@ -602,7 +531,6 @@ async function showCreateModal() {
   createModal.category = ''
   createModal.tags = ''
   createModal.isPublic = true
-  createModal.vipOnly = !!(currentUser.value && currentUser.value.vipLevel > 0 && currentUser.value.vipExpireAt && new Date(currentUser.value.vipExpireAt) > new Date())
   createModal.show = true
 }
 
@@ -619,7 +547,7 @@ async function handleCreate() {
       category: createModal.category,
       tags: createModal.tags,
       isPublic: createModal.isPublic,
-      vipOnly: createModal.vipOnly
+      vipOnly: false
     })
     createModal.show = false
     message.success('发布成功')
@@ -681,9 +609,8 @@ function timeAgo(timeStr) {
         <n-space>
           <n-button type="success" @click="showCreateModal">✏️ 发布提示词</n-button>
           <template v-if="isLoggedIn">
-            <n-tag :type="currentUser?.vipLevel >= 1 ? 'warning' : 'success'" size="medium" round>
+            <n-tag type="success" size="medium" round>
               {{ currentUser?.nickname || currentUser?.username || '已登录' }}
-              <template v-if="currentUser?.vipLevel >= 1"> · VIP{{ currentUser.vipLevel }}</template>
             </n-tag>
             <n-button size="small" quaternary @click="handleLogout">退出</n-button>
           </template>
@@ -709,14 +636,6 @@ function timeAgo(timeStr) {
           <n-radio-button value="downloads">⬇️ 下载</n-radio-button>
           <n-radio-button value="comments">💬 评论</n-radio-button>
         </n-radio-group>
-        <n-divider vertical />
-        <n-button
-          :type="vipOnlyFilter ? 'warning' : 'default'"
-          size="small"
-          @click="vipOnlyFilter = !vipOnlyFilter; pagination.page = 1; loadPrompts()"
-        >
-          👑 VIP专属
-        </n-button>
       </n-space>
 
       <n-spin :show="loading">
@@ -731,7 +650,6 @@ function timeAgo(timeStr) {
               <template #header>
                 <n-space align="center" :size="6">
                   <n-text strong style="font-size: 15px">{{ item.title }}</n-text>
-                  <n-tag v-if="item.vipOnly" type="warning" size="tiny" round>👑 VIP</n-tag>
                 </n-space>
               </template>
               <template #header-extra>
@@ -744,7 +662,6 @@ function timeAgo(timeStr) {
                 <n-space justify="space-between" align="center">
                   <n-text depth="3" style="font-size: 12px">
                     {{ item.user?.nickname || item.user?.username || '匿名' }}
-                    <n-tag v-if="item.user?.vipLevel >= 1" type="warning" size="tiny" round style="margin-left: 2px">VIP{{ item.user.vipLevel }}</n-tag>
                     · {{ timeAgo(item.createdAt) }}
                   </n-text>
                   <n-space :size="12" style="font-size: 12px">
@@ -791,7 +708,6 @@ function timeAgo(timeStr) {
       <template v-if="detailModal.data">
         <n-space align="left" justify="space-between" style="margin-bottom: 12px">
           <n-space align="left" :size="8">
-            <n-tag v-if="detailModal.data.vipOnly" type="warning" size="small" round>👑 VIP专属</n-tag>
             <n-tag v-if="detailModal.data.category" type="info" size="small">{{ detailModal.data.category }}</n-tag>
             <n-text depth="3" style="font-size: 12px">
               {{ detailModal.data.user?.nickname || detailModal.data.user?.username || '匿名' }} · {{ formatTime(detailModal.data.createdAt) }}
@@ -858,15 +774,6 @@ function timeAgo(timeStr) {
                   :theme="editorTheme"
                   style="text-align: left"
                 />
-                <div
-                  v-if="detailModal.data.needVip"
-                  style="position: absolute; bottom: 0; left: 0; right: 0; height: 120px; background: linear-gradient(to bottom, transparent, var(--n-color)); display: flex; align-items: flex-end; justify-content: center; padding-bottom: 16px"
-                >
-                  <n-space vertical align="center" :size="4">
-                    <n-tag type="warning" size="medium" round>👑 VIP专属提示词</n-tag>
-                    <n-text depth="3" style="font-size: 12px">开通VIP查看完整内容</n-text>
-                  </n-space>
-                </div>
               </div>
             </n-space>
           </div>
@@ -921,18 +828,7 @@ function timeAgo(timeStr) {
       </template>
     </n-modal>
 
-    <n-modal v-model:show="loginModal.show" preset="card" style="width: 400px" :title="vipRequireLogin ? '🎉 VIP专属福利' : '账号'" :closable="!vipRequireLogin" :maskClosable="!vipRequireLogin" :closeOnEsc="!vipRequireLogin">
-      <div v-if="vipRequireLogin" style="margin-bottom: 16px; padding: 12px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 8px; color: #fff">
-        <div style="font-size: 15px; font-weight: 600; margin-bottom: 8px">✨ 欢迎回来，VIP用户！</div>
-        <div style="font-size: 13px; line-height: 1.6; opacity: 0.95">
-          登录后即可解锁专属权益：
-          <div style="margin-top: 6px; padding-left: 8px">
-            📖 查看 <b>VIP专属提示词</b>，获取更精准的分析策略<br/>
-            🔒 自动绑定当前设备，保障账号安全<br/>
-            💡 与社区用户共享投资灵感
-          </div>
-        </div>
-      </div>
+    <n-modal v-model:show="loginModal.show" preset="card" style="width: 400px" title="账号">
       <n-tabs v-model:value="loginModal.tab" type="line">
         <n-tab-pane name="login" tab="登录">
           <n-space vertical :size="12">
@@ -969,10 +865,6 @@ function timeAgo(timeStr) {
         <n-space align="center">
           <n-text>公开</n-text>
           <n-switch v-model:value="createModal.isPublic" />
-          <n-divider vertical />
-          <n-text>VIP专属</n-text>
-          <n-switch v-model:value="createModal.vipOnly" />
-          <n-text depth="3" style="font-size: 12px">仅VIP用户可查看完整内容</n-text>
         </n-space>
         <n-space justify="end">
           <n-button @click="createModal.show = false">取消</n-button>
@@ -998,10 +890,6 @@ function timeAgo(timeStr) {
         <n-space align="center">
           <n-text>公开</n-text>
           <n-switch v-model:value="editModal.isPublic" />
-          <n-divider vertical />
-          <n-text>VIP专属</n-text>
-          <n-switch v-model:value="editModal.vipOnly" />
-          <n-text depth="3" style="font-size: 12px">仅VIP用户可查看完整内容</n-text>
         </n-space>
         <n-space justify="end">
           <n-button @click="editModal.show = false">取消</n-button>
@@ -1037,7 +925,6 @@ function timeAgo(timeStr) {
                   style="min-width: 28px; text-align: center"
                 >{{ item.rank }}</n-tag>
                 <n-text strong>{{ item.title }}</n-text>
-                <n-tag v-if="item.vipOnly" type="warning" size="tiny" round>👑 VIP</n-tag>
                 <n-text depth="3" style="font-size: 12px">
                   {{ item.user?.nickname || item.user?.username || '匿名' }}
                 </n-text>

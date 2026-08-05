@@ -2,11 +2,9 @@
 import { MdPreview } from 'md-editor-v3';
 import 'md-editor-v3/lib/preview.css';
 import {h, computed, nextTick, onBeforeUnmount, onMounted, ref} from 'vue';
-import {CheckUpdate, GetConfig, GetVersionInfo,GetSponsorInfo,GetUserManual,OpenURL,RestartAsAdmin} from "../../wailsjs/go/main/App";
+import {CheckUpdate, GetConfig, GetVersionInfo,GetUserManual,OpenURL,RestartAsAdmin} from "../../wailsjs/go/main/App";
 import {EventsOff, EventsOn,Environment} from "../../wailsjs/runtime";
 import {NAvatar, NButton, NTree, useNotification,NText} from "naive-ui";
-import { addMonths, format ,parse} from 'date-fns';
-import { zhCN } from 'date-fns/locale';
 const updateLog = ref('');
 const versionInfo = ref('');
 const icon = ref('https://raw.githubusercontent.com/ArvinLovegood/go-stock/master/build/appicon.png');
@@ -14,10 +12,6 @@ const alipay =ref('https://github.com/ArvinLovegood/go-stock/raw/master/build/sc
 const wxpay =ref('https://github.com/ArvinLovegood/go-stock/raw/master/build/screenshot/wxpay.jpg')
 const wxgzh =ref('https://github.com/ArvinLovegood/go-stock/raw/dev/build/screenshot/%E6%89%AB%E7%A0%81_%E6%90%9C%E7%B4%A2%E8%81%94%E5%90%88%E4%BC%A0%E6%92%AD%E6%A0%B7%E5%BC%8F-%E7%99%BD%E8%89%B2%E7%89%88.png')
 const notify = useNotification()
-const vipLevel=ref("");
-const vipStartTime=ref("");
-const vipEndTime=ref("");
-const expired=ref(false)
 const showManual = ref(false)
 const manualContent = ref('')
 const manualId = 'manual-preview'
@@ -115,19 +109,6 @@ onMounted(() => {
     alipay.value=res.alipay;
     wxpay.value=res.wxpay;
     wxgzh.value=res.wxgzh;
-
-    GetSponsorInfo().then((res) => {
-      vipLevel.value = res.vipLevel;
-      vipStartTime.value = res.vipStartTime;
-      vipEndTime.value = res.vipEndTime;
-      //判断时间是否到期
-      if (res.vipLevel) {
-        if (res.vipEndTime < format(new Date(), 'yyyy-MM-dd HH:mm:ss')) {
-          notify.warning({content: 'VIP已到期'})
-          expired.value = true;
-        }
-      }
-    })
 
   });
 
@@ -232,14 +213,10 @@ EventsOn("updateNeedAdmin", (msg) => {
           <n-space vertical >
             <n-image width="100" :src="icon" />
             <h1>
-              <n-badge v-if="!vipLevel"  :value="versionInfo" :offset="[80,10]"  type="success">
+              <n-badge :value="versionInfo" :offset="[80,10]" type="success">
                 <n-gradient-text type="info" :size="50" >go-stock</n-gradient-text>
               </n-badge>
-              <n-badge v-if="vipLevel"  :value="versionInfo" :offset="[70,10]"  type="success">
-                <n-gradient-text :type="expired?'error':'warning'" :size="50" >go-stock</n-gradient-text><n-tag :bordered="false" size="small" type="warning">VIP{{vipLevel}}</n-tag>
-              </n-badge>
             </h1>
-            <n-gradient-text  :type="expired?'error':'warning'" v-if="vipLevel" >vip到期时间：{{vipEndTime}}</n-gradient-text>
             <n-flex justify="center">
               <n-button size="tiny" @click="CheckUpdate(1)"  type="info" tertiary >检查更新</n-button>
               <n-button size="tiny" @click="openManual" type="success" tertiary >查看用户手册</n-button>
@@ -264,29 +241,7 @@ EventsOn("updateNeedAdmin", (msg) => {
           </n-space>
           <n-divider title-placement="center">支持💕开源</n-divider>
           <n-flex justify="center">
-            <n-table  size="small" style="width: 820px">
-              <n-thead>
-                <n-tr>
-                  <n-th>赞助计划</n-th>
-                  <n-th>赞助等级</n-th>
-                  <n-th>权益说明</n-th>
-                </n-tr>
-              </n-thead>
-              <n-tbody>
-                <n-tr>
-                  <n-td>每月 0 RMB</n-td><n-td>vip0</n-td><n-td>🌟 全部功能,软件自动更新(从GitHub下载),自行解决github平台网络问题。</n-td>
-                </n-tr>
-                <n-tr>
-                  <n-td>赞助 18.8 RMB/月<br>赞助 120 RMB/年</n-td><n-td>vip1</n-td><n-td>💕 全部功能,软件自动更新(从CDN下载),更新快速便捷。AI配置指导，提示词参考等</n-td>
-                </n-tr>
-                <n-tr>
-                  <n-td>赞助 28.8 RMB/月<br>赞助 240 RMB/年</n-td><n-td>vip2</n-td><n-td>💕 vip1全部功能,启动时自动同步最近24小时市场资讯(包括外媒简讯)，go-stock Ai助手等(详询作者微信/QQ)💕</n-td>
-                </n-tr>
-                <n-tr>
-                  <n-td>每月赞助 X RMB</n-td><n-td>vipX</n-td><n-td>🧩 更多计划，视go-stock开源项目发展情况而定...(承接GitHub项目README广告推广💖)</n-td>
-                </n-tr>
-              </n-tbody>
-            </n-table>
+            <n-text depth="3">所有本地功能均已开放使用；如果项目对你有帮助，欢迎自愿支持开源开发。</n-text>
           </n-flex>
           <n-divider title-placement="center">关于作者</n-divider>
           <n-space vertical>

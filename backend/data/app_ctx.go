@@ -15,8 +15,9 @@ import (
 // -----------------------------------------------------------------------------------
 
 var (
-	appCtx   context.Context
-	appCtxMu sync.RWMutex
+	appCtx          context.Context
+	appEventEmitter func(name string, data ...any)
+	appCtxMu        sync.RWMutex
 )
 
 // SetAppCtx 设置全局 Wails 应用上下文（app startup 时调用）
@@ -26,14 +27,30 @@ func SetAppCtx(ctx context.Context) {
 	appCtxMu.Unlock()
 }
 
+// SetAppEventEmitter 设置 Web 模式的事件发送函数。
+func SetAppEventEmitter(emitter func(name string, data ...any)) {
+	appCtxMu.Lock()
+	appEventEmitter = emitter
+	appCtxMu.Unlock()
+}
+
+// EmitAppEvent 向当前前端发送事件；Web 模式优先使用 SSE emitter。
+func EmitAppEvent(name string, data ...any) {
+	appCtxMu.RLock()
+	emitter := appEventEmitter
+	ctx := appCtx
+	appCtxMu.RUnlock()
+	if emitter != nil {
+		emitter(name, data...)
+		return
+	}
+	if ctx != nil {
+		runtime.EventsEmit(ctx, name, data...)
+	}
+}
+
 // EmitStockDataChanged 向前端推送「股票数据已变更」事件，触发前端刷新分组/概念缓存。
 // 安全调用：AppCtx 未设置时静默跳过（如测试环境）。异步 emit 避免阻塞工具 handler。
 func EmitStockDataChanged() {
-	appCtxMu.RLock()
-	ctx := appCtx
-	appCtxMu.RUnlock()
-	if ctx == nil {
-		return
-	}
-	go runtime.EventsEmit(ctx, "stockDataChanged", "")
+	go EmitAppEvent("stockDataChanged", "")
 }

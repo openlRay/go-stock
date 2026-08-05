@@ -13,7 +13,6 @@ import (
 
 	"github.com/cloudwego/eino/schema"
 	"github.com/duke-git/lancet/v2/convertor"
-	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 // @Author spark
@@ -242,9 +241,9 @@ func (a *App) ChatWithAgent(question string, aiConfigId int, sysPromptId *int, m
 	// 使记忆按前端会话隔离：新对话生成新 sessionId，切换模型保持同一 sessionId。
 	ch := agent.NewStockAiAgentApi().ChatWithContext(ctx, question, aiConfigId, sysPromptId, memoryMode, memoryCount, thinkingMode, agentMode, "", sessionId)
 	for msg := range ch {
-		runtime.EventsEmit(a.ctx, "agent-message", agentMessageToFrontendMap(msg))
+		a.emit("agent-message", agentMessageToFrontendMap(msg))
 	}
-	runtime.EventsEmit(a.ctx, "agent-message", agentMessageToFrontendMap(&schema.Message{
+	a.emit("agent-message", agentMessageToFrontendMap(&schema.Message{
 		Role:    schema.Assistant,
 		Content: "agent-DONE",
 	}))

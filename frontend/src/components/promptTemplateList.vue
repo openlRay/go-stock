@@ -173,7 +173,6 @@ const shareDataRef = reactive({
   category: '',
   tags: '',
   isPublic: true,
-  vipOnly: false,
   loading: false
 })
 
@@ -298,24 +297,6 @@ function deletePromptTemplate(id) {
   })
 }
 
-async function checkUserIsVip() {
-  const token = localStorage.getItem('promptPlazaToken')
-  if (!token) return false
-  try {
-    const resp = await fetch(promptPlazaApiBase.value + '/auth/me', {
-      headers: { 'Authorization': `Bearer ${token}` }
-    })
-    const json = await resp.json()
-    if (json.code === 0 && json.data) {
-      const user = json.data
-      if (user.vipLevel > 0 && user.vipExpireAt) {
-        return new Date(user.vipExpireAt) > new Date()
-      }
-    }
-  } catch (e) { /* ignore */ }
-  return false
-}
-
 async function showShareModal(row) {
   shareDataRef.title = row.name || ''
   shareDataRef.content = row.content || ''
@@ -323,17 +304,12 @@ async function showShareModal(row) {
   shareDataRef.category = row.type || ''
   shareDataRef.tags = ''
   shareDataRef.isPublic = true
-  shareDataRef.vipOnly = false
   shareDataRef.visible = true
   await GetConfig().then(result => {
     if (result.promptPlazaApiBase) {
       promptPlazaApiBase.value = result.promptPlazaApiBase
     }
   })
-  const isVip = await checkUserIsVip()
-  if (isVip) {
-    shareDataRef.vipOnly = true
-  }
 }
 
 async function handleShare() {
@@ -361,7 +337,7 @@ async function handleShare() {
         category: shareDataRef.category,
         tags: shareDataRef.tags,
         isPublic: shareDataRef.isPublic,
-        vipOnly: shareDataRef.vipOnly
+        vipOnly: false
       })
     })
     const json = await resp.json()
@@ -460,10 +436,6 @@ async function handleShare() {
         <n-form-item label="公开">
           <n-space align="center">
             <n-switch v-model:value="shareDataRef.isPublic" />
-            <n-divider vertical />
-            <n-text>VIP专属</n-text>
-            <n-switch v-model:value="shareDataRef.vipOnly" />
-            <n-text depth="3" style="font-size: 12px">仅VIP用户可查看完整内容</n-text>
           </n-space>
         </n-form-item>
       </n-form>

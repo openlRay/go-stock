@@ -6,7 +6,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"go-stock/backend/agent"
@@ -23,7 +22,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/duke-git/lancet/v2/cryptor"
 	"github.com/inconshreveable/go-update"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert/yaml"
@@ -41,13 +39,13 @@ import (
 // App struct
 type App struct {
 	ctx                context.Context
+	eventEmitter       EventEmitter
+	webMode            bool
 	cache              *freecache.Cache
 	cron               *cron.Cron
 	cronEntrys         map[string]cron.EntryID
 	cronEntrysMu       sync.Mutex
 	AiTools            []data.Tool
-	SponsorInfo        map[string]any
-	VipLevel           int64
 	summaryMu          sync.Mutex
 	summaryCancel      context.CancelFunc
 	agentMu            sync.Mutex
@@ -94,19 +92,6 @@ func (a *App) removeCronEntry(key string) {
 	a.cronEntrysMu.Lock()
 	delete(a.cronEntrys, key)
 	a.cronEntrysMu.Unlock()
-}
-
-func (a *App) GetSponsorInfo() map[string]any {
-	return a.SponsorInfo
-}
-
-// GetEffectiveSponsorVip 从本地配置解密赞助信息并判断当前是否在 VIP 有效期内（与 ai-assistant-web / data.EffectiveSponsorVipLevel 一致）。
-func (a *App) GetEffectiveSponsorVip() map[string]any {
-	level, active := data.EffectiveSponsorVipLevel()
-	return map[string]any{
-		"vipLevel": level,
-		"active":   active,
-	}
 }
 
 func (a *App) GetMachineId() string {
@@ -216,6 +201,9 @@ func (a *App) PromptPlazaRequest(method, apiBase, path string, query map[string]
 }
 
 func (a *App) QuitApp() {
+	if a.webMode {
+		return
+	}
 	if a.ctx != nil {
 		if a.cron != nil {
 			a.cron.Stop()
@@ -223,68 +211,18 @@ func (a *App) QuitApp() {
 		runtime.Quit(a.ctx)
 	}
 }
-func (a *App) CheckSponsorCode(sponsorCode string) map[string]any {
-	sponsorCode = strutil.Trim(sponsorCode)
-	if sponsorCode != "" {
-		encrypted, err := hex.DecodeString(sponsorCode)
-		if err != nil {
-			return map[string]any{
-				"code": 0,
-				"msg":  "赞助码格式错误,请输入正确的赞助码!",
-			}
-		}
-		key, err := hex.DecodeString(BuildKey)
-		if err != nil {
-			logger.SugaredLogger.Error(err.Error())
-			return map[string]any{
-				"code": 0,
-				"msg":  "版本错误，不支持赞助码!",
-			}
-		}
-		decrypt := cryptor.AesEcbDecrypt(encrypted, key)
-		if decrypt == nil || len(decrypt) == 0 {
-			return map[string]any{
-				"code": 0,
-				"msg":  "赞助码错误，请输入正确的赞助码!",
-			}
-		}
-
-		// 校验通过后，将赞助码持久化到 Settings 中
-		config := data.GetSettingConfig()
-		// 只在赞助码变更时写库，避免无谓更新
-		if config.SponsorCode != sponsorCode {
-			config.SponsorCode = sponsorCode
-			data.UpdateConfig(config)
-		}
-
-		return map[string]any{
-			"code": 1,
-			"msg":  "赞助码校验成功，感谢您的支持!",
-		}
-	} else {
-		return map[string]any{"code": 0, "message": "赞助码不能为空,请输入正确的赞助码!"}
-	}
-}
 
 func (a *App) CheckUpdate(flag int) {
-	sponsorCode := strutil.Trim(a.GetConfig().SponsorCode)
-	if sponsorCode != "" {
-		encrypted, err := hex.DecodeString(sponsorCode)
-		if err != nil {
-			logger.SugaredLogger.Error(err.Error())
-			return
+	if a.webMode {
+		if flag == 1 {
+			a.emit("newsPush", map[string]any{
+				"time":    "Web Server 模式",
+				"isRed":   false,
+				"source":  "go-stock",
+				"content": "Web Server 请通过重新构建 Docker 镜像完成升级。",
+			})
 		}
-		key, err := hex.DecodeString(BuildKey)
-		if err != nil {
-			logger.SugaredLogger.Error(err.Error())
-			return
-		}
-		decrypt := string(cryptor.AesEcbDecrypt(encrypted, key))
-		err = json.Unmarshal([]byte(decrypt), &a.SponsorInfo)
-		if err != nil {
-			logger.SugaredLogger.Error(err.Error())
-			return
-		}
+		return
 	}
 
 	updateChannel := a.GetConfig().UpdateChannel
@@ -344,14 +282,6 @@ func (a *App) CheckUpdate(flag int) {
 		}
 	}
 
-	if _, vipLevel, ok := a.isVip(sponsorCode, "", releaseVersion); ok {
-		level, _ := convertor.ToInt(vipLevel)
-		a.VipLevel = level
-		if level >= 2 {
-			go a.syncNews()
-		}
-	}
-
 	if releaseVersion.TagName != Version {
 		tag := &models.Tag{}
 		tagResp, tagErr := data.SharedHTTPClient.R().
@@ -400,12 +330,10 @@ func (a *App) CheckUpdate(flag int) {
 			downloadUrl = fmt.Sprintf("https://github.com/ArvinLovegood/go-stock/releases/download/%s/%s", releaseVersion.TagName, assetName)
 		}
 
-		originalDownloadUrl := downloadUrl
-		downloadUrl, _, _ = a.isVip(sponsorCode, downloadUrl, releaseVersion)
-		mirrorDownloadUrl := "https://gh.927223.xyz/" + originalDownloadUrl
-		manualDownloadTip := fmt.Sprintf("\n手动下载链接(加速镜像): %s\n手动下载链接(原始地址): %s\n下载后请替换当前程序文件即可完成更新。", mirrorDownloadUrl, originalDownloadUrl)
+		mirrorDownloadUrl := "https://gh.927223.xyz/" + downloadUrl
+		manualDownloadTip := fmt.Sprintf("\n手动下载链接(加速镜像): %s\n手动下载链接(原始地址): %s\n下载后请替换当前程序文件即可完成更新。", mirrorDownloadUrl, downloadUrl)
 
-		go runtime.EventsEmit(a.ctx, "newsPush", map[string]any{
+		go a.emit("newsPush", map[string]any{
 			"time":    "发现新版本：" + releaseVersion.TagName,
 			"isRed":   true,
 			"source":  "go-stock",
@@ -415,7 +343,7 @@ func (a *App) CheckUpdate(flag int) {
 		tmpFile, err := os.CreateTemp("", "go-stock-update-*.tmp")
 		if err != nil {
 			logger.SugaredLogger.Errorf("create temp file error: %s", err.Error())
-			go runtime.EventsEmit(a.ctx, "newsPush", map[string]any{
+			go a.emit("newsPush", map[string]any{
 				"time":    "新版本：" + releaseVersion.TagName,
 				"isRed":   true,
 				"source":  "go-stock",
@@ -450,7 +378,7 @@ func (a *App) CheckUpdate(flag int) {
 		}
 
 		if !downloadSuccess {
-			go runtime.EventsEmit(a.ctx, "newsPush", map[string]any{
+			go a.emit("newsPush", map[string]any{
 				"time":    "新版本：" + releaseVersion.TagName,
 				"isRed":   true,
 				"source":  "go-stock",
@@ -462,7 +390,7 @@ func (a *App) CheckUpdate(flag int) {
 		body, err := os.ReadFile(tmpPath)
 		if err != nil {
 			logger.SugaredLogger.Errorf("read downloaded file error: %s", err.Error())
-			go runtime.EventsEmit(a.ctx, "newsPush", map[string]any{
+			go a.emit("newsPush", map[string]any{
 				"time":    "新版本：" + releaseVersion.TagName,
 				"isRed":   true,
 				"source":  "go-stock",
@@ -475,16 +403,16 @@ func (a *App) CheckUpdate(flag int) {
 		if err != nil {
 			logger.SugaredLogger.Error("更新失败: ", err.Error())
 			if !IsRunningAsAdmin() {
-				go runtime.EventsEmit(a.ctx, "updateNeedAdmin", map[string]any{
+				go a.emit("updateNeedAdmin", map[string]any{
 					"version": releaseVersion.TagName,
 					"message": commitMessage,
 				})
 			} else {
-				go runtime.EventsEmit(a.ctx, "updateVersion", releaseVersion)
+				go a.emit("updateVersion", releaseVersion)
 			}
 			return
 		} else {
-			go runtime.EventsEmit(a.ctx, "newsPush", map[string]any{
+			go a.emit("newsPush", map[string]any{
 				"time":    "新版本：" + releaseVersion.TagName,
 				"isRed":   true,
 				"source":  "go-stock",
@@ -493,7 +421,7 @@ func (a *App) CheckUpdate(flag int) {
 		}
 	} else {
 		if flag == 1 {
-			go runtime.EventsEmit(a.ctx, "newsPush", map[string]any{
+			go a.emit("newsPush", map[string]any{
 				"time":    "当前版本：" + Version,
 				"isRed":   true,
 				"source":  "go-stock",
@@ -502,82 +430,6 @@ func (a *App) CheckUpdate(flag int) {
 		}
 
 	}
-}
-
-func (a *App) isVip(sponsorCode string, downloadUrl string, releaseVersion *models.GitHubReleaseVersion) (string, string, bool) {
-	isVip := false
-	vipLevel := "0"
-	sponsorCode = strutil.Trim(a.GetConfig().SponsorCode)
-	if sponsorCode != "" {
-		encrypted, err := hex.DecodeString(sponsorCode)
-		if err != nil {
-			logger.SugaredLogger.Error(err.Error())
-			return "", "0", false
-		}
-		key, err := hex.DecodeString(BuildKey)
-		if err != nil {
-			logger.SugaredLogger.Error(err.Error())
-			return "", "0", false
-		}
-		decrypt := string(cryptor.AesEcbDecrypt(encrypted, key))
-		err = json.Unmarshal([]byte(decrypt), &a.SponsorInfo)
-		if err != nil {
-			logger.SugaredLogger.Error(err.Error())
-			return "", "0", false
-		}
-		vipLevel = a.SponsorInfo["vipLevel"].(string)
-		vipStartTime, err := time.ParseInLocation("2006-01-02 15:04:05", a.SponsorInfo["vipStartTime"].(string), time.Local)
-		vipEndTime, err := time.ParseInLocation("2006-01-02 15:04:05", a.SponsorInfo["vipEndTime"].(string), time.Local)
-		vipAuthTime, err := time.ParseInLocation("2006-01-02 15:04:05", a.SponsorInfo["vipAuthTime"].(string), time.Local)
-		if err != nil {
-			logger.SugaredLogger.Error(err.Error())
-			return "", vipLevel, false
-		}
-
-		if time.Now().After(vipAuthTime) && time.Now().After(vipStartTime) && time.Now().Before(vipEndTime) {
-			isVip = true
-		}
-
-		if IsWindows() {
-			winAssetName := "go-stock-windows-amd64.exe"
-			if IsArm64() {
-				winAssetName = "go-stock-windows-arm64.exe"
-			}
-			if isVip {
-				if a.SponsorInfo["winDownUrl"] == nil {
-					downloadUrl = fmt.Sprintf("https://gh.927223.xyz/https://github.com/ArvinLovegood/go-stock/releases/download/%s/%s", releaseVersion.TagName, winAssetName)
-				} else {
-					downloadUrl = a.SponsorInfo["winDownUrl"].(string)
-				}
-			} else {
-				downloadUrl = fmt.Sprintf("https://github.com/ArvinLovegood/go-stock/releases/download/%s/%s", releaseVersion.TagName, winAssetName)
-			}
-		}
-		if IsMacOS() {
-			if isVip {
-				if a.SponsorInfo["macDownUrl"] == nil {
-					downloadUrl = fmt.Sprintf("https://gh.927223.xyz/https://github.com/ArvinLovegood/go-stock/releases/download/%s/go-stock-darwin-universal", releaseVersion.TagName)
-				} else {
-					downloadUrl = a.SponsorInfo["macDownUrl"].(string)
-				}
-			} else {
-				downloadUrl = fmt.Sprintf("https://github.com/ArvinLovegood/go-stock/releases/download/%s/go-stock-darwin-universal", releaseVersion.TagName)
-			}
-		}
-		if IsLinux() {
-			if isVip {
-				if a.SponsorInfo["linuxDownUrl"] == nil {
-					downloadUrl = fmt.Sprintf("https://gh.927223.xyz/https://github.com/ArvinLovegood/go-stock/releases/download/%s/go-stock-linux-amd64", releaseVersion.TagName)
-				} else {
-					downloadUrl = a.SponsorInfo["linuxDownUrl"].(string)
-				}
-			} else {
-				downloadUrl = fmt.Sprintf("https://github.com/ArvinLovegood/go-stock/releases/download/%s/go-stock-linux-amd64", releaseVersion.TagName)
-			}
-		}
-
-	}
-	return downloadUrl, vipLevel, isVip
 }
 
 func (a *App) syncNews() {
@@ -667,7 +519,7 @@ func (a *App) domReady(ctx context.Context) {
 		// 增加延迟确保前端已准备好接收事件
 		go func() {
 			time.Sleep(2 * time.Second)
-			runtime.EventsEmit(a.ctx, "loadingMsg", "done")
+			a.emit("loadingMsg", "done")
 		}()
 	}()
 
@@ -729,7 +581,7 @@ func (a *App) domReady(ctx context.Context) {
 			if data.GetSettingConfig().EnablePushNews {
 				go a.NewsPush(news)
 			}
-			go runtime.EventsEmit(a.ctx, "newTelegraph", news)
+			go a.emit("newTelegraph", news)
 		})
 		if err != nil {
 			logger.SugaredLogger.Errorf("AddFunc error:%s", err.Error())
@@ -742,7 +594,7 @@ func (a *App) domReady(ctx context.Context) {
 			if data.GetSettingConfig().EnablePushNews {
 				go a.NewsPush(news)
 			}
-			go runtime.EventsEmit(a.ctx, "newSinaNews", news)
+			go a.emit("newSinaNews", news)
 		})
 		if err != nil {
 			logger.SugaredLogger.Errorf("AddFunc error:%s", err.Error())
@@ -755,7 +607,7 @@ func (a *App) domReady(ctx context.Context) {
 			if data.GetSettingConfig().EnablePushNews {
 				go a.NewsPush(news)
 			}
-			go runtime.EventsEmit(a.ctx, "tradingViewNews", news)
+			go a.emit("tradingViewNews", news)
 		})
 		if err != nil {
 			logger.SugaredLogger.Errorf("AddFunc error:%s", err.Error())
@@ -830,7 +682,7 @@ func (a *App) domReady(ctx context.Context) {
 		id, err := a.cron.AddFunc(fmt.Sprintf("@every %ds", 60), func() {
 			telegraph := refreshTelegraphList()
 			if telegraph != nil {
-				go runtime.EventsEmit(a.ctx, "telegraph", telegraph)
+				go a.emit("telegraph", telegraph)
 			}
 		})
 		if err != nil {
@@ -839,7 +691,7 @@ func (a *App) domReady(ctx context.Context) {
 			a.setCronEntry("refreshTelegraphList", id)
 		}
 
-		go runtime.EventsEmit(a.ctx, "telegraph", refreshTelegraphList())
+		go a.emit("telegraph", refreshTelegraphList())
 	}
 	go MonitorStockPrices(a)
 	if config.EnableFund {
@@ -892,7 +744,11 @@ func (a *App) domReady(ctx context.Context) {
 	}()
 	//检查新版本
 	go func() {
-		a.CheckUpdate(0)
+		// 财经新闻同步对所有版本开放，并与桌面自更新逻辑解耦。
+		go a.syncNews()
+		if !a.webMode {
+			a.CheckUpdate(0)
+		}
 		go a.CheckStockBaseInfo(a.ctx)
 		go syncAllStockInfo(a.ctx)
 
@@ -900,10 +756,13 @@ func (a *App) domReady(ctx context.Context) {
 			logger.SugaredLogger.Errorf("Checking for updates...")
 			a.CheckStockBaseInfo(a.ctx)
 		})
-		a.cron.AddFunc("30 05 8,12,20 * * *", func() {
-			logger.SugaredLogger.Errorf("Checking for updates...")
-			a.CheckUpdate(0)
-		})
+		if !a.webMode {
+			a.cron.AddFunc("30 05 8,12,20 * * *", func() {
+				logger.SugaredLogger.Infof("Checking for updates...")
+				a.CheckUpdate(0)
+			})
+		}
+		a.cron.AddFunc("30 05 8,12,20 * * *", a.syncNews)
 		a.cron.AddFunc("30 05 8,12,20 * * *", func() {
 			syncAllStockInfo(a.ctx)
 		})
@@ -945,7 +804,7 @@ func (a *App) domReady(ctx context.Context) {
 func syncAllStockInfo(ctx context.Context) {
 	defer PanicHandler()
 	defer func() {
-		go runtime.EventsEmit(ctx, "loadingMsg", "done")
+		go data.EmitAppEvent("loadingMsg", "done")
 	}()
 	db.Dao.Unscoped().Model(&models.AllStockInfo{}).Where("1=1").Delete(&models.AllStockInfo{})
 	for page := 1; page < 3; page++ {
@@ -963,7 +822,7 @@ func syncAllStockInfo(ctx context.Context) {
 func (a *App) CheckStockBaseInfo(ctx context.Context) {
 	defer PanicHandler()
 	defer func() {
-		go runtime.EventsEmit(ctx, "loadingMsg", "done")
+		go a.emit("loadingMsg", "done")
 	}()
 	stockBasics := &[]data.StockBasic{}
 	data.SharedHTTPClient.R().
@@ -1102,10 +961,10 @@ func (a *App) NewsPush(news *[]models.Telegraph) {
 	for _, telegraph := range *news {
 		if onlyPushRed {
 			if telegraph.IsRed || strutil.ContainsAny(telegraph.Content, stockNames) {
-				go runtime.EventsEmit(a.ctx, "newsPush", telegraph)
+				go a.emit("newsPush", telegraph)
 			}
 		} else {
-			go runtime.EventsEmit(a.ctx, "newsPush", telegraph)
+			go a.emit("newsPush", telegraph)
 		}
 		//go data.NewAlertWindowsApi("go-stock", telegraph.Source+" "+telegraph.Time, telegraph.Content, string(icon)).SendNotification()
 		//}
@@ -1114,7 +973,7 @@ func (a *App) NewsPush(news *[]models.Telegraph) {
 
 func (a *App) AddCronTask(follow data.FollowedStock) func() {
 	return func() {
-		go runtime.EventsEmit(a.ctx, "warnMsg", "开始自动分析"+follow.Name+"_"+follow.StockCode)
+		go a.emit("warnMsg", "开始自动分析"+follow.Name+"_"+follow.StockCode)
 		ai := data.NewDeepSeekOpenAi(a.ctx, follow.AiConfigId)
 		thinking := data.GetSettingConfig().GetAIConfigThinking(follow.AiConfigId)
 		msgs := ai.NewChatStream(follow.Name, follow.StockCode, "", nil, a.AiTools, thinking)
@@ -1138,7 +997,7 @@ func (a *App) AddCronTask(follow data.FollowedStock) func() {
 		}
 
 		data.NewDeepSeekOpenAi(a.ctx, follow.AiConfigId).SaveAIResponseResult(follow.StockCode, follow.Name, res.String(), chatId, question)
-		go runtime.EventsEmit(a.ctx, "warnMsg", "AI分析完成："+follow.Name+"_"+follow.StockCode)
+		go a.emit("warnMsg", "AI分析完成："+follow.Name+"_"+follow.StockCode)
 
 	}
 }
@@ -1521,7 +1380,7 @@ func MonitorAiRecommendStockPrices(a *App) {
 					go data.NewAlertWindowsApi("go-stock价格预警", title, content, "").SendNotification()
 					go data.NewDingDingAPI().SendToDingDing(title, content)
 					go data.NewFeishuAPI().SendToFeishu(title, content)
-					go runtime.EventsEmit(a.ctx, "newsPush", map[string]any{
+					go a.emit("newsPush", map[string]any{
 						"time":    title,
 						"isRed":   true,
 						"source":  "go-stock",
@@ -1554,7 +1413,7 @@ func MonitorAiRecommendStockPrices(a *App) {
 					go data.NewAlertWindowsApi("go-stock价格预警", title, content, "").SendNotification()
 					go data.NewDingDingAPI().SendToDingDing(title, content)
 					go data.NewFeishuAPI().SendToFeishu(title, content)
-					go runtime.EventsEmit(a.ctx, "newsPush", map[string]any{
+					go a.emit("newsPush", map[string]any{
 						"time":    title,
 						"isRed":   true,
 						"source":  "go-stock",
@@ -1588,7 +1447,7 @@ func MonitorAiRecommendStockPrices(a *App) {
 					go data.NewAlertWindowsApi("go-stock价格预警", title, content, "").SendNotification()
 					go data.NewDingDingAPI().SendToDingDing(title, content)
 					go data.NewFeishuAPI().SendToFeishu(title, content)
-					go runtime.EventsEmit(a.ctx, "newsPush", map[string]any{
+					go a.emit("newsPush", map[string]any{
 						"time":    title,
 						"isRed":   true,
 						"source":  "go-stock",
@@ -1673,7 +1532,7 @@ func MonitorFollowedStockCostPrices(a *App) {
 					go data.NewAlertWindowsApi("go-stock价格预警", title, content, "").SendNotification()
 					go data.NewDingDingAPI().SendToDingDing(title, content)
 					go data.NewFeishuAPI().SendToFeishu(title, content)
-					go runtime.EventsEmit(a.ctx, "newsPush", map[string]any{
+					go a.emit("newsPush", map[string]any{
 						"time":    title,
 						"isRed":   true,
 						"source":  "go-stock",
@@ -1951,7 +1810,7 @@ func (a *App) SendDingDingMessageByType(message string, stockCode string, msgTyp
 	db.Dao.Model(stockInfo).Where("code = ?", stockCode).First(stockInfo)
 	go data.NewAlertWindowsApi("go-stock消息通知", getMsgTypeName(msgType), GenNotificationMsg(stockInfo), "").SendNotification()
 
-	go runtime.EventsEmit(a.ctx, "newsPush", map[string]any{
+	go a.emit("newsPush", map[string]any{
 		"time":    "📈 " + getMsgTypeName(msgType),
 		"isRed":   true,
 		"source":  "go-stock",
@@ -2000,7 +1859,7 @@ func (a *App) SendFeishuMessageByType(message string, stockCode string, msgType 
 	db.Dao.Model(stockInfo).Where("code = ?", stockCode).First(stockInfo)
 	go data.NewAlertWindowsApi("go-stock消息通知", getMsgTypeName(msgType), GenNotificationMsg(stockInfo), "").SendNotification()
 
-	go runtime.EventsEmit(a.ctx, "newsPush", map[string]any{
+	go a.emit("newsPush", map[string]any{
 		"time":    "📈 " + getMsgTypeName(msgType),
 		"isRed":   true,
 		"source":  "go-stock",
@@ -2090,11 +1949,11 @@ func (a *App) NewChatStream(stock, stockCode, question string, aiConfigId int, s
 	defer func() {
 		if err := recover(); err != nil {
 			logger.SugaredLogger.Errorf("NewChatStream panic: %v", err)
-			runtime.EventsEmit(a.ctx, "newChatStream", map[string]any{
+			a.emit("newChatStream", map[string]any{
 				"code":    0,
 				"content": fmt.Sprintf("AI分析异常: %v", err),
 			})
-			runtime.EventsEmit(a.ctx, "newChatStream", "DONE")
+			a.emit("newChatStream", "DONE")
 		}
 	}()
 	var msgs <-chan map[string]any
@@ -2104,9 +1963,9 @@ func (a *App) NewChatStream(stock, stockCode, question string, aiConfigId int, s
 		msgs = data.NewDeepSeekOpenAi(a.ctx, aiConfigId).NewChatStream(stock, stockCode, question, sysPromptId, []data.Tool{}, think)
 	}
 	for msg := range msgs {
-		runtime.EventsEmit(a.ctx, "newChatStream", msg)
+		a.emit("newChatStream", msg)
 	}
-	runtime.EventsEmit(a.ctx, "newChatStream", "DONE")
+	a.emit("newChatStream", "DONE")
 }
 
 func (a *App) SaveAIResponseResult(stockCode, stockName, result, chatId, question string, aiConfigId int) {
@@ -2813,14 +2672,14 @@ func (a *App) SummaryStockNews(question string, aiConfigId int, sysPromptId *int
 	}
 
 	for msg := range msgs {
-		runtime.EventsEmit(a.ctx, eventName, msg)
+		a.emit(eventName, msg)
 	}
 
 	a.summaryMu.Lock()
 	a.summaryCancel = nil
 	a.summaryMu.Unlock()
 
-	runtime.EventsEmit(a.ctx, eventName, "DONE")
+	a.emit(eventName, "DONE")
 }
 func (a *App) GetIndustryRank(sort string, cnt int) []any {
 	res := data.NewMarketNewsApi().GetIndustryRank(sort, cnt)
@@ -3743,7 +3602,10 @@ func (a *App) ImportSkillPackage() string {
 	if err != nil || zipPath == "" {
 		return "未选择文件"
 	}
+	return a.importSkillPackage(zipPath, filepath.Base(zipPath))
+}
 
+func (a *App) importSkillPackage(zipPath, packageName string) string {
 	// 读取 zip 文件
 	reader, err := zip.OpenReader(zipPath)
 	if err != nil {
@@ -3753,25 +3615,26 @@ func (a *App) ImportSkillPackage() string {
 
 	// 验证包含 SKILL.md，并确定技能目录名
 	var skillDirName string
+	var archiveRoot string
 	hasSkillMd := false
 	for _, f := range reader.File {
-		// 防止 zip slip 路径穿越
-		if strings.Contains(f.Name, "..") {
+		cleanName := filepath.Clean(filepath.FromSlash(f.Name))
+		if filepath.IsAbs(cleanName) || cleanName == ".." || strings.HasPrefix(cleanName, ".."+string(filepath.Separator)) {
 			return "压缩包包含非法路径: " + f.Name
 		}
-		base := filepath.Base(f.Name)
+		base := filepath.Base(cleanName)
 		if base == "SKILL.md" && !f.FileInfo().IsDir() {
 			hasSkillMd = true
 			// 如果 SKILL.md 在子目录中，用该子目录名作为技能名
-			dir := filepath.Dir(f.Name)
+			dir := filepath.Dir(cleanName)
 			if dir == "." || dir == "" {
 				// SKILL.md 在根目录，用 zip 文件名作为技能名
-				skillDirName = strings.TrimSuffix(filepath.Base(zipPath), ".zip")
+				skillDirName = strings.TrimSuffix(filepath.Base(packageName), filepath.Ext(packageName))
 			} else {
 				// 取第一级目录名
 				skillDirName = strings.SplitN(filepath.ToSlash(dir), "/", 2)[0]
+				archiveRoot = filepath.ToSlash(dir) + "/"
 			}
-			break
 		}
 	}
 	if !hasSkillMd {
@@ -3784,12 +3647,23 @@ func (a *App) ImportSkillPackage() string {
 		skillDirName = "imported-skill"
 	}
 
-	targetDir := filepath.Join(skillsDir(), skillDirName)
-
-	// 如果目录已存在，先删除（覆盖导入）
-	if _, err := os.Stat(targetDir); err == nil {
-		os.RemoveAll(targetDir)
+	skillsBase := skillsDir()
+	if err := os.MkdirAll(skillsBase, 0o755); err != nil {
+		return "创建 skills 目录失败: " + err.Error()
 	}
+	finalTargetDir := filepath.Join(skillsBase, skillDirName)
+	stagingRoot, err := os.MkdirTemp(skillsBase, ".skill-import-*")
+	if err != nil {
+		return "创建技能导入临时目录失败: " + err.Error()
+	}
+	cleanupStaging := true
+	defer func() {
+		if cleanupStaging {
+			_ = os.RemoveAll(stagingRoot)
+		}
+	}()
+	targetDir := filepath.Join(stagingRoot, skillDirName)
+
 	if err := os.MkdirAll(targetDir, 0o755); err != nil {
 		return "创建技能目录失败: " + err.Error()
 	}
@@ -3799,9 +3673,27 @@ func (a *App) ImportSkillPackage() string {
 	var totalSize int64
 	const maxTotalSize = 100 * 1024 * 1024 // 总计 100MB 上限
 	for _, f := range reader.File {
+		entryName := filepath.ToSlash(filepath.Clean(filepath.FromSlash(f.Name)))
+		if archiveRoot != "" {
+			if !strings.HasPrefix(entryName, archiveRoot) {
+				continue
+			}
+			entryName = strings.TrimPrefix(entryName, archiveRoot)
+		}
+		if entryName == "" || entryName == "." {
+			continue
+		}
+		cleanName := filepath.Clean(filepath.FromSlash(entryName))
+		if filepath.IsAbs(cleanName) || cleanName == ".." || strings.HasPrefix(cleanName, ".."+string(filepath.Separator)) {
+			os.RemoveAll(targetDir)
+			return "压缩包包含非法路径: " + f.Name
+		}
+		fullPath := filepath.Join(targetDir, cleanName)
 		if f.FileInfo().IsDir() {
-			fullPath := filepath.Join(targetDir, f.Name)
-			os.MkdirAll(fullPath, 0o755)
+			if err := os.MkdirAll(fullPath, 0o755); err != nil {
+				os.RemoveAll(targetDir)
+				return "创建技能目录失败: " + err.Error()
+			}
 			continue
 		}
 
@@ -3822,9 +3714,12 @@ func (a *App) ImportSkillPackage() string {
 			return "解压失败: " + err.Error()
 		}
 
-		fullPath := filepath.Join(targetDir, f.Name)
 		// 确保父目录存在
-		os.MkdirAll(filepath.Dir(fullPath), 0o755)
+		if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
+			rc.Close()
+			os.RemoveAll(targetDir)
+			return "创建技能目录失败: " + err.Error()
+		}
 
 		outFile, err := os.Create(fullPath)
 		if err != nil {
@@ -3842,7 +3737,33 @@ func (a *App) ImportSkillPackage() string {
 		}
 	}
 
-	logger.SugaredLogger.Infof("技能包导入成功: %s -> %s", skillDirName, targetDir)
+	backupDir, err := os.MkdirTemp(stagingRoot, ".previous-*")
+	if err != nil {
+		return "创建技能备份路径失败: " + err.Error()
+	}
+	if err := os.Remove(backupDir); err != nil {
+		return "准备技能备份路径失败: " + err.Error()
+	}
+	hasPrevious := false
+	if _, err := os.Stat(finalTargetDir); err == nil {
+		if err := os.Rename(finalTargetDir, backupDir); err != nil {
+			return "备份已有技能失败: " + err.Error()
+		}
+		hasPrevious = true
+	} else if !os.IsNotExist(err) {
+		return "检查已有技能失败: " + err.Error()
+	}
+	if err := os.Rename(targetDir, finalTargetDir); err != nil {
+		if hasPrevious {
+			if restoreErr := os.Rename(backupDir, finalTargetDir); restoreErr != nil {
+				cleanupStaging = false
+				return "安装技能失败: " + err.Error() + "; 恢复原技能也失败，备份保留在: " + backupDir
+			}
+		}
+		return "安装技能失败: " + err.Error()
+	}
+
+	logger.SugaredLogger.Infof("技能包导入成功: %s -> %s", skillDirName, finalTargetDir)
 	return "技能 '" + skillDirName + "' 导入成功"
 }
 

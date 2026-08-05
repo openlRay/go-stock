@@ -311,9 +311,7 @@ func GetSettingConfig() *SettingConfig {
 			settings.KDays = 60
 		}
 	}
-	if settings.BrowserPath == "" {
-		settings.BrowserPath, _ = CheckBrowser()
-	}
+	settings.BrowserPath = resolveBrowserPath(settings.BrowserPath)
 	if settings.BrowserPoolSize <= 0 {
 		settings.BrowserPoolSize = 1
 	}

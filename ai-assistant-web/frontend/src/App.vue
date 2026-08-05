@@ -1,14 +1,5 @@
 <template>
-  <div v-if="vipGateLoading" class="vip-gate">
-    <NSpin size="large" />
-    <div class="vip-gate-text">正在校验赞助身份…</div>
-  </div>
-  <div v-else-if="!vipGateOk" class="vip-gate vip-gate-denied">
-    <div class="vip-gate-title">需要 VIP2 及以上</div>
-    <p class="vip-gate-desc">{{ vipGateMessage }}</p>
-    <p class="vip-gate-hint">请使用已在「关于」页填写赞助码的 go-stock，并确保 Web 服务读取同一套 data 配置（默认工作目录下的 data 目录）。</p>
-  </div>
-  <div v-else class="page">
+  <div class="page">
         <div class="header">
           <div class="title">go-stock AI 助手（Web）</div>
           <div class="motto">「{{ currentMotto }}」</div>
@@ -175,7 +166,6 @@ import {
   getAiConfigs,
   getPrompts,
   getSession,
-  getVipStatus,
   saveSession,
   shareText,
   type PromptTemplate,
@@ -226,12 +216,6 @@ let mottoTimer: ReturnType<typeof setInterval> | null = null
 function refreshMotto() {
   currentMotto.value = investmentMottos[Math.floor(Math.random() * investmentMottos.length)]
 }
-
-const vipGateLoading = ref(true);
-const vipGateOk = ref(false);
-const vipGateMessage = ref(
-  "go-stock AI 助手（Web）仅对 VIP2 及以上有效赞助用户开放。请在 go-stock 桌面客户端「关于」页面填写赞助码。"
-);
 
 const aiConfigId = ref<number | null>(null);
 const aiConfigOptions = ref<SelectOption[]>([]);
@@ -560,18 +544,6 @@ async function shareLast() {
 }
 
 onMounted(async () => {
-  vipGateLoading.value = true;
-  try {
-    const st = await getVipStatus();
-    vipGateOk.value = !!st.ok;
-    if (!st.ok && st.message) vipGateMessage.value = st.message;
-  } catch (e: any) {
-    vipGateOk.value = false;
-    vipGateMessage.value = "无法连接校验接口，请确认 ai-assistant-web 已启动：" + String(e?.message ?? e);
-  } finally {
-    vipGateLoading.value = false;
-  }
-  if (!vipGateOk.value) return;
   loadInit().catch((e) => {
     message.error(String(e?.message ?? e));
     startNewChat();
@@ -588,41 +560,6 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-.vip-gate {
-  min-height: 60vh;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 16px;
-  padding: 32px 20px;
-  text-align: center;
-}
-.vip-gate-text {
-  font-size: 14px;
-  color: rgba(0, 0, 0, 0.55);
-}
-.vip-gate-denied {
-  max-width: 520px;
-  margin: 0 auto;
-}
-.vip-gate-title {
-  font-size: 20px;
-  font-weight: 700;
-  color: #111827;
-}
-.vip-gate-desc {
-  margin: 0;
-  font-size: 15px;
-  line-height: 1.6;
-  color: #374151;
-}
-.vip-gate-hint {
-  margin: 0;
-  font-size: 13px;
-  line-height: 1.55;
-  color: #6b7280;
-}
 .page {
   max-width: 980px;
   margin: 0 auto;

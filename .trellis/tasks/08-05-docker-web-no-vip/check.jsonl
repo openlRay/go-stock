@@ -1,0 +1,5 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"Quality gate for Go tests, Web build, and Docker deployment"}
+{"file":".trellis/spec/backend/error-handling.md","reason":"Review RPC error responses and panic recovery"}
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"Review SQLite WAL directory persistence and single-instance constraints"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Review frontend-backend contracts and event round trips"}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Review desktop and Web behavior for duplicated implementations"}

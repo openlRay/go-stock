@@ -1,0 +1,37 @@
+services:
+  go-stock:
+    image: go-stock:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        NODE_IMAGE: "${NODE_IMAGE:-docker.m.daocloud.io/library/node:22-bookworm-slim}"
+        GO_IMAGE: "${GO_IMAGE:-docker.m.daocloud.io/library/golang:1.26-bookworm}"
+        RUNTIME_IMAGE: "${RUNTIME_IMAGE:-docker.m.daocloud.io/library/debian:bookworm-slim}"
+        DEBIAN_MIRROR: "${DEBIAN_MIRROR:-https://mirrors.aliyun.com}"
+    restart: unless-stopped
+    init: true
+    environment:
+      TZ: Asia/Shanghai
+      GO_STOCK_WEB_ADDR: 0.0.0.0:18888
+    ports:
+      - "${GO_STOCK_WEB_HOST:-127.0.0.1}:${GO_STOCK_WEB_PORT:-18888}:18888"
+    volumes:
+      - go-stock-data:/app/data
+      - go-stock-skills:/app/skills
+      - go-stock-logs:/app/logs
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "--show-error", "http://127.0.0.1:18888/api/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+    stop_grace_period: 20s
+
+volumes:
+  go-stock-data:
+    name: go-stock-data
+  go-stock-skills:
+    name: go-stock-skills
+  go-stock-logs:
+    name: go-stock-logs

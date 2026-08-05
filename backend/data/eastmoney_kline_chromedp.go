@@ -134,14 +134,9 @@ func FetchEastMoneyCookiesViaChromedp(browserPath string, timeout time.Duration,
 //
 // 支持同时缓存多个页面的 Cookie
 func fetchEastMoneyCookiesViaChromedp(browserPath string, timeout time.Duration, pageURL string) (cookieHeader string, err error) {
-	browserPath = strings.TrimSpace(browserPath)
+	browserPath = resolveBrowserPath(browserPath)
 	if browserPath == "" {
-		// 自动检测系统浏览器
-		browserPath, _ = CheckBrowser()
-		if browserPath == "" {
-			return "", fmt.Errorf("chromedp: 未配置浏览器路径且未检测到系统浏览器 (Edge/Chrome/Firefox)")
-		}
-		logger.SugaredLogger.Infof("chromedp: 自动检测到浏览器路径：%s", browserPath)
+		return "", fmt.Errorf("chromedp: 未配置浏览器路径且未检测到系统浏览器 (Edge/Chrome/Firefox)")
 	}
 	//logger.SugaredLogger.Debugf("chromedp: 获取 Cookie，浏览器路径：%s，URL：%s", browserPath, pageURL)
 

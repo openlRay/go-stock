@@ -3,17 +3,15 @@ import {h, onBeforeMount, onMounted, ref, reactive, watch, computed} from 'vue'
 import {
   GetAllStockInfoList,
   GetAllStocks,
-  GetConfig, GetSponsorInfo, GetEffectiveSponsorVip, Follow, GetGroupList, AddStockGroup, AddGroup
+  GetConfig, Follow, GetGroupList, AddStockGroup, AddGroup
 } from "../../wailsjs/go/main/App";
-import {NButton, NInput, NTag, NText, useMessage, useNotification, NDataTable, NSpace, NPagination, NDropdown, NIcon} from "naive-ui";
+import {NButton, NInput, NTag, NText, useMessage, NDataTable, NSpace, NPagination, NDropdown, NIcon} from "naive-ui";
 import sparkLine from "./stockSparkLine.vue"
 import klineChart from "./KLineChart.vue"
 import KLineChart from "./KLineChart.vue";
 import StockLightweightKlineChart from "./StockLightweightKlineChart.vue";
 import {FolderOpenOutline, AddOutline} from "@vicons/ionicons5";
-import {format} from "date-fns";
 
-const notify = useNotification()
 const message = useMessage()
 
 const editorDataRef = reactive({
@@ -26,25 +24,6 @@ onBeforeMount(() => {
       editorDataRef.darkTheme = true
     }
   })
-
-  GetSponsorInfo().then((res) => {
-    // console.log(res)
-    vipLevel.value = res.vipLevel;
-    vipStartTime.value = res.vipStartTime;
-    vipEndTime.value = res.vipEndTime;
-    //判断时间是否到期
-    if (res.vipLevel) {
-      if (res.vipEndTime < format(new Date(), 'yyyy-MM-dd HH:mm:ss')) {
-        //notify.warning({content: 'VIP已到期'})
-        expired.value = true;
-      }
-    }else{
-      //notify.success({content: '未开通VIP'})
-    }
-    isValidVip.value = !(vipLevel.value === "" || Number(vipLevel.value) <= 0);
-
-  })
-
 })
 
 onMounted(() => {
@@ -55,28 +34,9 @@ onMounted(() => {
 
 const dataRef = ref([])
 const loadingRef = ref(false)
-const vipLevel=ref("");
-const vipStartTime=ref("");
-const vipEndTime=ref("");
-const expired=ref(false)
-const isValidVip=ref(false) // 是否是会员
-
-// 多周期 K 线（VIP2）
-const effectiveVipLevel = ref(0)
 const multiKlineModalShow = ref(false)
 const multiKlineCode = ref('')
 const multiKlineName = ref('')
-
-async function refreshEffectiveVip() {
-  try {
-    const r = await GetEffectiveSponsorVip()
-    const active = !!r?.active
-    const lvl = Number(r?.vipLevel ?? 0)
-    effectiveVipLevel.value = active && !Number.isNaN(lvl) ? lvl : 0
-  } catch (_) {
-    effectiveVipLevel.value = 0
-  }
-}
 
 function toEastMoneyCodeFromSecucode(secucode) {
   if (!secucode) return ''
@@ -95,11 +55,6 @@ async function showMultiKline(row) {
   const em = toEastMoneyCodeFromSecucode(row.SECUCODE)
   if (!em) {
     message.warning('当前代码暂不支持多周期K线图')
-    return
-  }
-  await refreshEffectiveVip()
-  if (effectiveVipLevel.value < 2) {
-    message.warning('多周期 K 线仅限 VIP2 及以上用户使用，您当前权限不足')
     return
   }
   multiKlineCode.value = em
@@ -422,9 +377,6 @@ const optionsReactive= reactive([
  ])
 
 function loadStocks(page, pageSize) {
-  if((vipLevel.value===""|| Number(vipLevel.value) <=0)){
-    handleReset()
-  }
   if (!loadingRef.value) {
     loadingRef.value = true
     GetAllStocks(page, pageSize, paginationReactive.keyword, technicalIndicatorReactive).then((res) => {
@@ -449,11 +401,6 @@ function loadStocks(page, pageSize) {
   }
 }
 function handleCheckedChange(checked) {
-
-  if(checked&&(vipLevel.value===""|| Number(vipLevel.value) <=0)){
-    handleReset()
-    message.warning('未开通VIP或者已经过期，无法使用技术面筛选')
-  }
 }
 function handlePageChange(currentPage) {
   loadStocks(currentPage, paginationReactive.pageSize)

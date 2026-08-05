@@ -46,8 +46,6 @@ export function CheckDeviceBinding(arg1:string,arg2:string):Promise<Record<strin
 
 export function CheckFrequentTrading(arg1:string):Promise<Record<string, any>>;
 
-export function CheckSponsorCode(arg1:string):Promise<Record<string, any>>;
-
 export function CheckStockBaseInfo(arg1:context.Context):Promise<void>;
 
 export function CheckUpdate(arg1:number):Promise<void>;
@@ -192,8 +190,6 @@ export function GetDailyOperationPlanByID(arg1:number):Promise<models.DailyOpera
 
 export function GetDailyOperationPlanList(arg1:models.DailyOperationPlanQuery):Promise<models.DailyOperationPlanPageData>;
 
-export function GetEffectiveSponsorVip():Promise<Record<string, any>>;
-
 export function GetFeishuBotStatus():Promise<string>;
 
 export function GetFollowList(arg1:number):Promise<any>;
@@ -255,8 +251,6 @@ export function GetSectorAnchors(arg1:string):Promise<Array<data.SectorAnchor>>;
 export function GetSkillByID(arg1:number):Promise<models.Skill>;
 
 export function GetSkillList(arg1:models.SkillQuery):Promise<models.SkillPageResp>;
-
-export function GetSponsorInfo():Promise<Record<string, any>>;
 
 export function GetStockChangeHistory(arg1:models.StockChangeHistoryQuery):Promise<models.StockChangeHistoryPageData>;
 

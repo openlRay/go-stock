@@ -1,0 +1,47 @@
+# Version control and development tooling
+.git
+.github
+.trellis
+.agents
+.claude
+.codex
+.cursor
+.idea
+.qoder
+.trae
+
+# Local runtime state must never enter the image
+/data
+/logs
+/skills
+/ai-assistant-web/data
+**/*.db
+**/*.db-*
+**/*.sqlite
+**/*.sqlite-*
+**/*.log
+
+# Environment files and common private-key formats
+.env
+.env.*
+**/.env
+**/.env.*
+**/*.key
+**/*.pem
+**/*.p12
+**/*.pfx
+
+# Dependencies, generated output, and local binaries
+**/node_modules
+/frontend/dist
+/build/bin
+dist
+coverage
+*.exe
+*.test
+*.out
+
+# Editor and operating-system metadata
+**/.DS_Store
+**/*.swp
+**/*~

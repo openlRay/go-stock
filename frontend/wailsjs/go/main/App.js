@@ -82,10 +82,6 @@ export function CheckFrequentTrading(arg1) {
   return window['go']['main']['App']['CheckFrequentTrading'](arg1);
 }
 
-export function CheckSponsorCode(arg1) {
-  return window['go']['main']['App']['CheckSponsorCode'](arg1);
-}
-
 export function CheckStockBaseInfo(arg1) {
   return window['go']['main']['App']['CheckStockBaseInfo'](arg1);
 }
@@ -374,10 +370,6 @@ export function GetDailyOperationPlanList(arg1) {
   return window['go']['main']['App']['GetDailyOperationPlanList'](arg1);
 }
 
-export function GetEffectiveSponsorVip() {
-  return window['go']['main']['App']['GetEffectiveSponsorVip']();
-}
-
 export function GetFeishuBotStatus() {
   return window['go']['main']['App']['GetFeishuBotStatus']();
 }
@@ -500,10 +492,6 @@ export function GetSkillByID(arg1) {
 
 export function GetSkillList(arg1) {
   return window['go']['main']['App']['GetSkillList'](arg1);
-}
-
-export function GetSponsorInfo() {
-  return window['go']['main']['App']['GetSponsorInfo']();
 }
 
 export function GetStockChangeHistory(arg1) {

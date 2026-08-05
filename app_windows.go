@@ -1,5 +1,5 @@
-//go:build windows
-// +build windows
+//go:build windows && !web
+// +build windows,!web
 
 package main
 

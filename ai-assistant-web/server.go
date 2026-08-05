@@ -62,7 +62,6 @@ func Start() error {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/api/health", a.health)
-	mux.HandleFunc("/api/vip-status", a.vipStatus)
 	mux.HandleFunc("/api/ai-configs", a.getAIConfigs)
 	mux.HandleFunc("/api/prompts", a.getPrompts)
 	mux.HandleFunc("/api/session", a.session)
@@ -88,49 +87,7 @@ func (a *app) health(w http.ResponseWriter, _ *http.Request) {
 	})
 }
 
-func (a *app) vipStatus(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		return
-	}
-	level, active := data.EffectiveSponsorVipLevel()
-	ok := active && level >= 2
-	payload := map[string]any{
-		"ok":       ok,
-		"vipLevel": level,
-		"active":   active,
-	}
-	if !ok {
-		payload["message"] = vipDeniedMessage(level, active)
-	}
-	writeJSON(w, http.StatusOK, payload)
-}
-
-func vipDeniedMessage(level int, active bool) string {
-	if !active && level > 0 {
-		return "检测到赞助信息，但当前不在 VIP 有效期内或尚未到授权生效时间。请在 go-stock 客户端「关于」确认赞助状态。"
-	}
-	return "go-stock AI 助手（Web）仅对 VIP2 及以上有效赞助用户开放。请在 go-stock 桌面客户端「关于」页面填写赞助码后，使用与本机相同的 data 目录启动服务。"
-}
-
-func requireVip2(w http.ResponseWriter) bool {
-	level, active := data.EffectiveSponsorVipLevel()
-	if active && level >= 2 {
-		return true
-	}
-	writeJSON(w, http.StatusForbidden, map[string]any{
-		"code":     "VIP2_REQUIRED",
-		"message":  vipDeniedMessage(level, active),
-		"vipLevel": level,
-		"active":   active,
-	})
-	return false
-}
-
 func (a *app) getAIConfigs(w http.ResponseWriter, _ *http.Request) {
-	if !requireVip2(w) {
-		return
-	}
 	cfgs := data.GetSettingConfig().AiConfigs
 	resp := make([]aiConfigResp, 0, len(cfgs))
 	for _, c := range cfgs {
@@ -145,9 +102,6 @@ func (a *app) getAIConfigs(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (a *app) getPrompts(w http.ResponseWriter, r *http.Request) {
-	if !requireVip2(w) {
-		return
-	}
 	name := strings.TrimSpace(r.URL.Query().Get("name"))
 	promptType := strings.TrimSpace(r.URL.Query().Get("type"))
 	res := data.NewPromptTemplateApi().GetPromptTemplates(name, promptType)
@@ -155,9 +109,6 @@ func (a *app) getPrompts(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *app) session(w http.ResponseWriter, r *http.Request) {
-	if !requireVip2(w) {
-		return
-	}
 	switch r.Method {
 	case http.MethodGet:
 		sessionId := r.URL.Query().Get("sessionId")
@@ -188,10 +139,6 @@ func (a *app) summaryChatStream(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
-	if !requireVip2(w) {
-		return
-	}
-
 	var req chatRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid request body"})
@@ -266,9 +213,6 @@ func (a *app) summaryChatStream(w http.ResponseWriter, r *http.Request) {
 func (a *app) shareText(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		w.WriteHeader(http.StatusMethodNotAllowed)
-		return
-	}
-	if !requireVip2(w) {
 		return
 	}
 	var req shareRequest

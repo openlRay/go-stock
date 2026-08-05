@@ -2,8 +2,11 @@ import {createApp} from 'vue'
 import naive from 'naive-ui'
 import App from './App.vue'
 import router from './router/router'
+import {installWebBridge} from './web-bridge'
 // 引入组件库的少量全局样式变量
 import 'tdesign-vue-next/es/style/index.css';
+
+installWebBridge()
 
 const app = createApp(App)
 
