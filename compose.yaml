@@ -16,8 +16,10 @@ services:
     environment:
       TZ: Asia/Shanghai
       GO_STOCK_WEB_ADDR: 0.0.0.0:18888
+    # 默认绑定 0.0.0.0，便于 NAS / 局域网用 IP:端口访问。
+    # Web 版无登录，勿直接暴露公网；仅本机访问时可设 GO_STOCK_WEB_HOST=127.0.0.1
     ports:
-      - "${GO_STOCK_WEB_HOST:-127.0.0.1}:${GO_STOCK_WEB_PORT:-18888}:18888"
+      - "${GO_STOCK_WEB_HOST:-0.0.0.0}:${GO_STOCK_WEB_PORT:-18888}:18888"
     volumes:
       - go-stock-data:/app/data
       - go-stock-skills:/app/skills
