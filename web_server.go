@@ -131,6 +131,7 @@ func newWebHTTPServer(addr string, app *App, hub *webEventHub) (*http.Server, er
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/health", api.health)
 	mux.HandleFunc("/api/rpc", api.rpc)
+	mux.HandleFunc("/api/rpc/", api.rpc)
 	mux.HandleFunc("/api/events", api.events)
 	mux.HandleFunc("/api/skills/import", api.importSkill)
 	mux.HandleFunc("/", api.serveSPA)
@@ -249,11 +250,19 @@ func (a *webAPI) rpc(w http.ResponseWriter, r *http.Request) {
 		writeWebJSON(w, http.StatusBadRequest, webRPCResponse{Error: "请求格式错误: " + err.Error()})
 		return
 	}
-	if _, ok := a.allowedMethods[req.Method]; !ok {
-		writeWebJSON(w, http.StatusNotFound, webRPCResponse{Error: "未知方法: " + req.Method})
+	methodName := req.Method
+	if strings.HasPrefix(r.URL.Path, "/api/rpc/") {
+		methodName = strings.TrimPrefix(r.URL.Path, "/api/rpc/")
+		if req.Method != "" && req.Method != methodName {
+			writeWebJSON(w, http.StatusBadRequest, webRPCResponse{Error: "RPC 路径与请求方法不一致"})
+			return
+		}
+	}
+	if _, ok := a.allowedMethods[methodName]; !ok {
+		writeWebJSON(w, http.StatusNotFound, webRPCResponse{Error: "未知方法: " + methodName})
 		return
 	}
-	result, err := callWebMethod(a.app, req.Method, req.Args)
+	result, err := callWebMethod(a.app, methodName, req.Args)
 	if err != nil {
 		writeWebJSON(w, http.StatusBadRequest, webRPCResponse{Error: err.Error()})
 		return

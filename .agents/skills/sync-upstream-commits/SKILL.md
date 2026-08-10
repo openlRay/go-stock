@@ -15,10 +15,36 @@ description: 将 ArvinLovegood/go-stock 的 dev 分支普通合并到当前分�
 - 不自动 stash、提交、暂存、reset、clean 或搬运用户已有改动。
 - 不使用 rebase、cherry-pick、squash、`--allow-unrelated-histories`、全局
   `ours`/`theirs` 或 `-s ours`。
-- 不自动更新目标分支、push、force-push、创建 PR 或删除安全分支。
+- 不自动更新目标分支、push、创建 PR 或删除安全分支。只有用户在验证结果之后再次
+  明确要求交付，才执行“第三阶段：显式交付”；用户在最初同步请求中提前写明 push
+  也不算验证后的交付授权。任何情况下都不 force-push。
 - 遇到无法判断的业务选择、不可重生成的产物或新增测试失败时停止并询问用户。
 
+## 两道授权闸门
+
+必须按时间顺序取得两条独立的新用户消息，禁止用早期消息预授权后续阶段：
+
+1. 展示缺失提交和重叠路径后，等待第一条新消息批准创建集成分支并 merge。
+2. 完成适配、验证并报告结果后，停在集成分支，等待第二条新消息批准更新 `dev`
+   和/或 push。
+
+即使最初请求写着“同步、验证后直接推送”，也必须经过上述两次暂停。任何测试失败、
+远端变化或范围变化都会使未执行阶段的旧授权失效，需要重新报告并等待新消息。
+
 ## 第一阶段：检查并展示缺失提交
+
+0. 预检 Git 运行时：
+
+   ```bash
+   command -v git
+   git --version
+   git status --short --branch
+   ```
+
+   若任一命令出现 `bad fsmonitor version`、无法读取 index extension 或同类兼容性
+   错误，立即停止，不得信任 staged/unstaged 判断。查找本机已有的较新 Git 并验证，
+   或取得用户批准后升级；选定后整轮使用同一个绝对路径，不混用不同 Git 二进制。
+   禁止通过临时/永久关闭 fsmonitor、改写仓库配置或环境变量来绕过兼容错误。
 
 1. 确认当前仓库、当前分支和目标 `refs/heads/dev`。记录：
 
@@ -66,19 +92,23 @@ description: 将 ArvinLovegood/go-stock 的 dev 分支普通合并到当前分�
    返回第一阶段。
 
 2. 从固定目标 SHA 创建唯一的 `codex/sync-upstream-dev-*` 集成分支，不直接在
-   `dev` 上工作。兼容本项目的 Git 2.20.1，使用：
+   `dev` 上工作。使用已通过预检的 Git：
 
    ```bash
    git checkout -b <唯一集成分支名> <固定目标SHA>
    ```
 
-3. 执行普通合并：
+3. 在固定目标 SHA 上记录合并前质量基线。至少运行后续强制验证中的同一组命令；
+   若全量测试依赖外网、用户配置或本地数据库，保留准确的失败、超时和环境信息，
+   不把既有失败当作本轮回归，也不擅自修改无关测试。
+
+4. 执行普通合并：
 
    ```bash
    git merge --no-ff --no-commit <固定上游SHA>
    ```
 
-4. 若没有文本冲突，仍检查双方重叠路径和上游影响的关键子系统。处理冲突时按需
+5. 若没有文本冲突，仍检查双方重叠路径和上游影响的关键子系统。处理冲突时按需
    读取 [项目适配参考](references/project-adaptation.md)；merge commit 创建后还要
    无条件执行其中的“强制 Web 兼容审查”。
 
@@ -133,7 +163,8 @@ description: 将 ArvinLovegood/go-stock 的 dev 分支普通合并到当前分�
    ```
 
    再根据 [项目适配参考](references/project-adaptation.md) 和实际受影响路径补充
-   Docker smoke、AI Web 前端构建或其他专项测试。任何新增失败都必须修复或阻断。
+   Docker smoke、AI Web 前端构建或其他专项测试。把结果与合并前基线对比：本轮新增
+   失败必须修复或阻断；既有失败必须如实报告，除非用户扩大范围，否则不要顺手修复。
 2. 验证固定上游 tip 已纳入：
 
    ```bash
@@ -145,6 +176,42 @@ description: 将 ArvinLovegood/go-stock 的 dev 分支普通合并到当前分�
 
 3. 报告目标 SHA、上游 SHA、merge commit、可选适配 commit、冲突决策和测试结果。
    停留在集成分支，不自动更新 `dev` 或 push。
+
+## 第三阶段：显式交付
+
+只在用户看过验证结果后发出一条新的明确指令，要求“合并到 dev”“推送远端”或
+等价操作时执行。若最初请求已经同时要求同步和 push，仍先停在集成分支报告验证结果，
+等待报告之后的再次确认。交付授权不改变上游来源，也不授权 force-push。
+
+1. 独立确认目标分支和交付远端 URL；`origin` 只是常见的 fork 交付远端，不能把它
+   当作第一阶段的上游来源。获取远端 `dev`，固定交付前 SHA：
+
+   ```bash
+   git remote get-url --all <交付远端>
+   git fetch <交付远端> dev
+   git rev-parse refs/heads/dev
+   git rev-parse refs/remotes/<交付远端>/dev
+   ```
+
+2. 要求远端 `dev` 与本地目标一致，或是已验证集成分支的祖先。若远端出现新提交，
+   停止并重新评估普通 merge；不得用 rebase、reset 或强推绕过。
+3. 确认工作区干净，再将本地 `dev` 快进到集成分支：
+
+   ```bash
+   git checkout dev
+   git merge --ff-only <集成分支>
+   ```
+
+4. 推送普通 `dev`，然后从远端重新读取 SHA 并要求与本地 `dev` 完全一致：
+
+   ```bash
+   git push <交付远端> dev
+   git ls-remote --heads <交付远端> refs/heads/dev
+   git rev-parse refs/heads/dev
+   ```
+
+5. 报告最终 SHA、远端 URL 和工作区状态。若 Web 方法或生成绑定发生变化，提醒用户
+   Git 交付不会自动重启已运行的 Go Web 服务或重建 Docker 镜像。
 
 ## 中断处理
 

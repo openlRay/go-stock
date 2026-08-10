@@ -20,6 +20,7 @@ This directory contains guidelines for backend development. Fill in each file wi
 | [Quality Guidelines](./quality-guidelines.md) | Code standards, forbidden patterns | To fill |
 | [Logging Guidelines](./logging-guidelines.md) | Structured logging, log levels | To fill |
 | [Web Runtime and Docker Contract](./web-runtime.md) | Web build tags, RPC/SSE boundary, and persistent runtime paths | Active |
+| [Feishu Webhook Signing](./feishu-webhook.md) | Custom bot signature generation, raw-message signing, and safe validation | Active |
 
 ---
 

@@ -4,6 +4,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -31,7 +32,8 @@ func NewFeishuAPI() *FeishuAPI {
 	}
 }
 
-// SendFeishuMessage 直接 POST 原始 message 体到飞书 webhook（对齐 SendDingDingMessage，供前端测试/原始发送）
+// SendFeishuMessage POST 原始 message 体到飞书 webhook（对齐 SendDingDingMessage，供前端测试/原始发送）。
+// 启用签名校验时必须在后端注入当前 timestamp/sign，避免调用方复用过期签名或遗漏签名字段。
 func (FeishuAPI) SendFeishuMessage(message string) string {
 	cfg := GetSettingConfig()
 	if cfg == nil || !cfg.FeishuPushEnable {
@@ -40,9 +42,18 @@ func (FeishuAPI) SendFeishuMessage(message string) string {
 	if strings.TrimSpace(cfg.FeishuRobot) == "" {
 		return "飞书推送未配置机器人地址"
 	}
+	requestBody := message
+	if secret := strings.TrimSpace(cfg.FeishuSecret); secret != "" {
+		var err error
+		requestBody, err = addFeishuSignature(message, secret, time.Now())
+		if err != nil {
+			logger.SugaredLogger.Errorf("sign feishu message error: %v", err)
+			return "发送飞书消息失败: " + err.Error()
+		}
+	}
 	resp, err := SharedHTTPClient.R().
 		SetHeader("Content-Type", "application/json").
-		SetBody(message).
+		SetBody(requestBody).
 		Post(cfg.FeishuRobot)
 	if err != nil {
 		logger.SugaredLogger.Error(err.Error())
@@ -100,9 +111,7 @@ func (f FeishuAPI) SendToFeishu(title, message string) string {
 
 	// 可选签名校验：FeishuSecret 非空时启用
 	if secret := strings.TrimSpace(cfg.FeishuSecret); secret != "" {
-		ts := time.Now().Unix()
-		body.Timestamp = fmt.Sprintf("%d", ts)
-		body.Sign = genFeishuSign(secret, ts)
+		body.Timestamp, body.Sign = newFeishuSignature(secret, time.Now())
 	}
 
 	resp, err := SharedHTTPClient.R().
@@ -126,6 +135,31 @@ func genFeishuSign(secret string, timestamp int64) string {
 	return base64.StdEncoding.EncodeToString(h.Sum(nil))
 }
 
+func newFeishuSignature(secret string, now time.Time) (timestamp, sign string) {
+	ts := now.Unix()
+	return fmt.Sprintf("%d", ts), genFeishuSign(secret, ts)
+}
+
+func addFeishuSignature(message, secret string, now time.Time) (string, error) {
+	var body map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(message), &body); err != nil {
+		return "", fmt.Errorf("飞书消息必须是 JSON 对象: %w", err)
+	}
+	if body == nil {
+		return "", fmt.Errorf("飞书消息必须是 JSON 对象")
+	}
+	timestamp, sign := newFeishuSignature(secret, now)
+	timestampJSON, _ := json.Marshal(timestamp)
+	signJSON, _ := json.Marshal(sign)
+	body["timestamp"] = timestampJSON
+	body["sign"] = signJSON
+	signedBody, err := json.Marshal(body)
+	if err != nil {
+		return "", fmt.Errorf("生成飞书签名消息失败: %w", err)
+	}
+	return string(signedBody), nil
+}
+
 // parseFeishuResponse 解析飞书返回体，code==0 为成功
 func parseFeishuResponse(body string) string {
 	code := int(gjson.Get(body, "code").Int())
@@ -135,6 +169,9 @@ func parseFeishuResponse(body string) string {
 	msg := gjson.Get(body, "msg").String()
 	if msg == "" {
 		msg = body
+	}
+	if code == 19021 {
+		msg += "；请确认填写的是该自定义机器人的签名校验 Secret（不是应用 App Secret），并检查系统时间是否准确"
 	}
 	return fmt.Sprintf("发送飞书消息失败: code=%d msg=%s", code, msg)
 }

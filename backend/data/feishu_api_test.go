@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"go-stock/backend/db"
 
@@ -52,6 +53,33 @@ func TestFeishuSign(t *testing.T) {
 	// 同输入应幂等
 	if genFeishuSign(secret, timestamp) != got {
 		t.Fatal("same input should produce same sign")
+	}
+}
+
+func TestAddFeishuSignature(t *testing.T) {
+	now := time.Unix(1599360473, 0)
+	message := `{"msg_type":"text","content":{"text":"hello"},"timestamp":"stale","sign":"stale"}`
+
+	signed, err := addFeishuSignature(message, "demo-secret", now)
+	if err != nil {
+		t.Fatalf("addFeishuSignature() error = %v", err)
+	}
+	if got := gjson.Get(signed, "timestamp").String(); got != "1599360473" {
+		t.Fatalf("timestamp = %q, body = %s", got, signed)
+	}
+	if got := gjson.Get(signed, "sign").String(); got != genFeishuSign("demo-secret", now.Unix()) {
+		t.Fatalf("sign = %q, body = %s", got, signed)
+	}
+	if got := gjson.Get(signed, "content.text").String(); got != "hello" {
+		t.Fatalf("message content changed: %s", signed)
+	}
+}
+
+func TestAddFeishuSignatureRejectsInvalidMessage(t *testing.T) {
+	for _, message := range []string{"not-json", "null", `[]`} {
+		if _, err := addFeishuSignature(message, "demo-secret", time.Now()); err == nil {
+			t.Fatalf("expected invalid message error for %q", message)
+		}
 	}
 }
 
@@ -143,7 +171,7 @@ func TestParseFeishuResponse(t *testing.T) {
 	if got := parseFeishuResponse(`{"code":0,"msg":"success"}`); got != "发送飞书消息成功" {
 		t.Fatalf("success case mismatch: %s", got)
 	}
-	if got := parseFeishuResponse(`{"code":19021,"msg":"sign match fail or timestamp is not within one hour from current time"}`); !strings.Contains(got, "19021") || !strings.Contains(got, "sign match fail") {
+	if got := parseFeishuResponse(`{"code":19021,"msg":"sign match fail or timestamp is not within one hour from current time"}`); !strings.Contains(got, "19021") || !strings.Contains(got, "sign match fail") || !strings.Contains(got, "不是应用 App Secret") {
 		t.Fatalf("fail case mismatch: %s", got)
 	}
 	if got := parseFeishuResponse(`{"code":9499,"msg":"Bad Request"}`); !strings.Contains(got, "9499") {

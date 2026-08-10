@@ -102,6 +102,54 @@ func TestWebRPCRejectsUnknownMethod(t *testing.T) {
 	}
 }
 
+func TestWebRPCRoutes(t *testing.T) {
+	server, err := newWebHTTPServer("127.0.0.1:0", &App{}, newWebEventHub())
+	if err != nil {
+		t.Fatalf("newWebHTTPServer() error = %v", err)
+	}
+
+	tests := []struct {
+		name string
+		path string
+		body string
+	}{
+		{name: "method in path", path: "/api/rpc/GetTimezone", body: `{"args":[]}`},
+		{name: "legacy method in body", path: "/api/rpc", body: `{"method":"GetTimezone","args":[]}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, tt.path, strings.NewReader(tt.body))
+			req.Header.Set("Content-Type", "application/json")
+			recorder := httptest.NewRecorder()
+
+			server.Handler.ServeHTTP(recorder, req)
+			if recorder.Code != http.StatusOK {
+				t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+			}
+		})
+	}
+}
+
+func TestWebRPCRejectsConflictingPathAndBodyMethods(t *testing.T) {
+	api := &webAPI{
+		app:            &App{},
+		hub:            newWebEventHub(),
+		allowedMethods: map[string]struct{}{"GetTimezone": {}, "GetConfig": {}},
+	}
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/rpc/GetTimezone",
+		strings.NewReader(`{"method":"GetConfig","args":[]}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	api.rpc(recorder, req)
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+}
+
 func TestWebRPCRejectsDesktopOnlyMethod(t *testing.T) {
 	allowedMethods, err := loadWebBindingMethods()
 	if err != nil {

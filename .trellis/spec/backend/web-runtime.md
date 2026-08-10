@@ -52,7 +52,8 @@ HTTP surface:
 
 ```text
 GET  /api/health
-POST /api/rpc
+POST /api/rpc/{method}
+POST /api/rpc             (legacy compatibility)
 GET  /api/events
 POST /api/skills/import
 GET  /*                 (embedded SPA with index.html fallback)
@@ -94,11 +95,13 @@ Web 与桌面能力的构建边界：
 
 RPC request and response:
 
-```json
-{"method":"GetStockList","args":["keyword"]}
+```text
+POST /api/rpc/GetStockList
+{"args":["keyword"]}
 {"result":{},"error":""}
 ```
 
+- The primary Web bridge must put the RPC method in the URL path so browser Network tooling identifies requests by method name. `POST /api/rpc` with `{"method":"...","args":[]}` remains a compatibility endpoint for older Web bundles.
 - `method` must be exported by `frontend/wailsjs/go/main/App.js` and implemented by `*App`.
 - Web RPC 必须排除 `CheckUpdate`、`QuitApp`、`RestartAsAdmin`、`OpenURL` 以及桌面文件对话框方法。浏览器可原生完成的打开链接、选文件和下载由 `web-bridge.js` 实现；不能原生完成的桌面能力直接隐藏，不能以 Web 空实现伪装成功。
 - `args` are decoded in method parameter order using the Go method signature.
@@ -167,7 +170,7 @@ RPC request and response:
 
 ### 6. Tests Required
 
-- `go test -tags web .`: assert the binding allowlist is implemented, invalid RPC is rejected, SSE stops cleanly, cross-origin requests fail, skill import is atomic, and Web update checks cannot run the desktop updater.
+- `go test -tags web .`: assert the binding allowlist is implemented, method-named and legacy RPC routes work, invalid RPC is rejected, SSE stops cleanly, cross-origin requests fail, skill import is atomic, and Web update checks cannot run the desktop updater.
 - `GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -tags web .`: assert the headless Linux artifact compiles without desktop platform files.
 - `go build .`: assert the current desktop entrypoint still compiles.
 - `npm --prefix frontend run build`: assert the bridge is bundled before Vue mounts.

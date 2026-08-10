@@ -667,7 +667,7 @@ function deletePrompt(ID) {
             <n-form-item-gi :span="22" v-if="formValue.feishuPush.enable" label="飞书签名校验 Secret："
                             path="feishuPush.feishuSecret">
               <n-input type="password" show-password-on="click"
-                       placeholder="可选：填写机器人安全设置的签名校验 Secret，留空则不签名"
+                       placeholder="可选：填写自定义机器人安全设置的签名校验 Secret（不是应用 App Secret），修改后请先保存"
                        v-model:value="formValue.feishuPush.feishuSecret"/>
               <n-button type="primary" @click="sendFeishuTestNotice">发送测试通知</n-button>
             </n-form-item-gi>

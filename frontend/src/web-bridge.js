@@ -34,10 +34,10 @@ function eventsOnMultiple(name, callback, maxCallbacks) {
 }
 
 async function callRPC(method, args) {
-  const response = await fetch('/api/rpc', {
+  const response = await fetch(`/api/rpc/${encodeURIComponent(method)}`, {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({method, args}),
+    body: JSON.stringify({args}),
   })
   const payload = await response.json().catch(() => ({error: `HTTP ${response.status}`}))
   if (!response.ok || payload.error) {
