@@ -15,6 +15,7 @@ import (
 	"go-stock/backend/logger"
 	"go-stock/backend/machineid"
 	"go-stock/backend/models"
+	"go-stock/backend/util"
 	"io"
 	"os"
 	"path/filepath"
@@ -2150,6 +2151,8 @@ func (a *App) ShareAnalysis(stockCode, stockName string) string {
 }
 
 // ShareText 直接把文本分享到社区（用于 AI 助手等非 AIResponseResult 场景）
+// title 为空时统一从 text 中提取首个 Markdown 标题或首行有效文本作为标题，
+// 提取失败回退为 "AI助手"。
 func (a *App) ShareText(text, title string) string {
 	text = strings.TrimSpace(text)
 	title = strings.TrimSpace(title)
@@ -2157,7 +2160,11 @@ func (a *App) ShareText(text, title string) string {
 		return "内容为空"
 	}
 	if title == "" {
-		title = "AI助手"
+		if extracted := util.ExtractTitleFromContent(text); extracted != "" {
+			title = extracted
+		} else {
+			title = "AI助手"
+		}
 	}
 	analysisTime := time.Now().Format("2006/01/02")
 	response, err := data.SharedHTTPClient.R().SetHeader("ua-x", "go-stock").SetFormData(map[string]string{
@@ -3578,8 +3585,14 @@ type FilesystemSkillInfo struct {
 	DirName     string `json:"dirName"`
 }
 
-// skillsDir 返回文件系统技能目录路径（与 agent.deepAgentRootDir 保持一致）
+// skillsDir 返回文件系统技能目录路径（与 agent.deepAgentRootDir 保持一致）。
+//
+// 使用可执行文件所在目录而非 os.Getwd()，确保无论从哪个工作目录启动 go-stock，
+// skills 目录都固定在程序所在目录下；可执行文件路径获取失败时降级到当前工作目录。
 func skillsDir() string {
+	if exePath, err := os.Executable(); err == nil && exePath != "" {
+		return filepath.Join(filepath.Dir(exePath), "skills")
+	}
 	wd, err := os.Getwd()
 	if err != nil || wd == "" {
 		wd = "."

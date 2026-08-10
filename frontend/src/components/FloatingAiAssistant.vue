@@ -443,7 +443,7 @@ function shareAiToCommunity() {
     shareTipVisible.value = true
     return
   }
-  shareTextToCommunity(text, 'AI助手')
+  shareTextToCommunity(text, '')
 }
 
 function shareAiContent(msg) {
@@ -453,7 +453,7 @@ function shareAiContent(msg) {
     shareTipVisible.value = true
     return
   }
-  shareTextToCommunity(text, 'AI助手')
+  shareTextToCommunity(text, '')
 }
 
 function assistantReplyExportTarget(editorId, bubble) {

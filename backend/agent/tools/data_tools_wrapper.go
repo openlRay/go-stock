@@ -2869,6 +2869,114 @@ func GetAllDataTools() []tool.BaseTool {
 		},
 	))
 
+	// 财联社财经日历（财经日历查询的优先数据源）
+	tools = append(tools, NewDataToolWrapper(
+		"GetClsCalendar",
+		"获取财联社财经日历，包含全球重要经济数据公布（公布值/预测值/前值/重要性星级）及财经事件，按日列示。财经日历查询优先使用此工具。数据来源：财联社(cls.cn)。",
+		map[string]*schema.ParameterInfo{
+			"date": {
+				Type:     "string",
+				Desc:     "指定日期，格式 YYYY-MM-DD，仅返回该日事件；留空返回今天及未来的财经日历",
+				Required: false,
+			},
+		},
+		func(args string) (string, error) {
+			date := gjson.Get(args, "date").String()
+			todayStr := time.Now().Format("2006-01-02")
+
+			res := data.NewMarketNewsApi().ClsCalendar()
+			if len(res) == 0 {
+				return "无符合条件的数据", nil
+			}
+
+			var b strings.Builder
+			b.WriteString("\n## 财联社财经日历\n")
+			count := 0
+			for _, a := range res {
+				bytes, err := json.Marshal(a)
+				if err != nil {
+					continue
+				}
+				day := gjson.Get(string(bytes), "calendar_day").String()
+				if day == "" {
+					continue
+				}
+				// 指定日期时仅保留该日；未指定时仅保留今天及未来（前瞻性财经日历）
+				if date != "" {
+					if day != date {
+						continue
+					}
+				} else if day < todayStr {
+					continue
+				}
+
+				week := gjson.Get(string(bytes), "week").String()
+				b.WriteString(fmt.Sprintf("\n### %s %s\n", day, week))
+				items := gjson.Get(string(bytes), "items")
+				items.ForEach(func(_, value gjson.Result) bool {
+					title := gjson.Get(value.String(), "title").String()
+					if title == "" {
+						return true
+					}
+					var tags []string
+					eco := gjson.Get(value.String(), "economic")
+					evt := gjson.Get(value.String(), "event")
+					if evt.Exists() {
+						tags = append(tags, "事件")
+					}
+					if eco.Exists() {
+						tags = append(tags, "数据")
+					}
+					tagStr := ""
+					if len(tags) > 0 {
+						tagStr = "【" + strings.Join(tags, "/") + "】"
+					}
+					// 重要性星级
+					star := 0
+					if eco.Exists() && eco.Get("star").Exists() {
+						star = int(eco.Get("star").Int())
+					} else if evt.Exists() && evt.Get("star").Exists() {
+						star = int(evt.Get("star").Int())
+					}
+					starStr := ""
+					if star > 0 {
+						starStr = " " + strings.Repeat("★", star)
+					}
+					line := fmt.Sprintf("- %s%s%s", tagStr, title, starStr)
+					// 经济数据附加公布/预测/前值
+					if eco.Exists() {
+						actual := eco.Get("actual").String()
+						consensus := eco.Get("consensus").String()
+						front := eco.Get("front").String()
+						var parts []string
+						if actual != "" {
+							parts = append(parts, "公布:"+actual)
+						}
+						if consensus != "" {
+							parts = append(parts, "预测:"+consensus)
+						}
+						if front != "" {
+							parts = append(parts, "前值:"+front)
+						}
+						if len(parts) > 0 {
+							line += " | " + strings.Join(parts, " ")
+						}
+					}
+					b.WriteString(line + "\n")
+					count++
+					return true
+				})
+			}
+			if count == 0 {
+				if date != "" {
+					return fmt.Sprintf("%s 暂无财经日历数据", date), nil
+				}
+				return "近期暂无财经日历数据", nil
+			}
+			return b.String(), nil
+		},
+	))
+
 	tools = append(tools, NewDataToolWrapper(
 		"GetStockNotice",
 		"获取个股公告信息",
@@ -6282,6 +6390,116 @@ func GetAllDataTools() []tool.BaseTool {
 			}
 			result := data.NewPromptTemplateApi().DelPrompt(uint(id))
 			return result, nil
+		},
+	))
+
+	// 融资融券余额排名（行业/概念/个股），数据来源于同花顺
+	tools = append(tools, NewDataToolWrapper(
+		"GetRzrqRank",
+		"获取融资融券余额排名数据（行业/概念/个股），含融资余额、融券余额、净买入额、两融余额、余额增幅、涨跌幅等。金额字段单位为千元。数据来源于同花顺。当指定日期无数据时会自动向前回退最多7天。",
+		map[string]*schema.ParameterInfo{
+			"type": {
+				Type:     "string",
+				Desc:     "排名维度：hyList(行业)/gnList(概念)/ggList(个股)，默认 hyList",
+				Required: false,
+			},
+			"sortKey": {
+				Type:     "string",
+				Desc:     "排序字段，默认 jmr(净买入额)。可选: jmr/rzye/rqye/rzmre/rzjmce/lrye/yezf/close_profit",
+				Required: false,
+			},
+			"sortType": {
+				Type:     "string",
+				Desc:     "排序方式：desc(降序,默认)/asc(升序)",
+				Required: false,
+			},
+			"date": {
+				Type:     "string",
+				Desc:     "查询日期，格式 YYYY-MM-DD，留空取最新",
+				Required: false,
+			},
+			"length": {
+				Type:     "integer",
+				Desc:     "返回条数，默认20",
+				Required: false,
+			},
+		},
+		func(args string) (string, error) {
+			rzrqType := gjson.Get(args, "type").String()
+			if rzrqType == "" {
+				rzrqType = "hyList"
+			}
+			sortKey := gjson.Get(args, "sortKey").String()
+			sortType := gjson.Get(args, "sortType").String()
+			date := gjson.Get(args, "date").String()
+			length := int(gjson.Get(args, "length").Int())
+			if length <= 0 {
+				length = 20
+			}
+
+			res := data.NewMarketNewsApi().RzrqRank(rzrqType, sortKey, sortType, date, length, 0)
+			// 无数据时逐日回退，最多尝试前 7 天
+			if res == nil || len(res.List) == 0 {
+				loc, _ := time.LoadLocation("Asia/Shanghai")
+				baseTs := time.Now().In(loc)
+				if date != "" {
+					if parsed, err := time.ParseInLocation("2006-01-02", date, loc); err == nil {
+						baseTs = parsed
+					}
+				}
+				for i := 1; i <= 7; i++ {
+					prev := baseTs.AddDate(0, 0, -i).Format("2006-01-02")
+					res = data.NewMarketNewsApi().RzrqRank(rzrqType, sortKey, sortType, prev, length, 0)
+					if res != nil && len(res.List) > 0 {
+						break
+					}
+				}
+			}
+
+			if res == nil || len(res.List) == 0 {
+				return "无符合条件的数据", nil
+			}
+
+			// 从首条数据提取实际日期用于标题
+			dataDate := ""
+			if len(res.List) > 0 && res.List[0].Date > 0 {
+				ts := res.List[0].Date
+				if ts > 1e12 {
+					ts = ts / 1000
+				}
+				dataDate = time.Unix(ts, 0).In(time.Local).Format("2006-01-02")
+			}
+			typeName := map[string]string{"hyList": "行业", "gnList": "概念", "ggList": "个股"}[res.Type]
+			if typeName == "" {
+				typeName = res.Type
+			}
+			title := fmt.Sprintf("融资融券余额排名-%s%s", typeName, func() string {
+				if dataDate != "" {
+					return "(" + dataDate + ")"
+				}
+				return ""
+			}())
+			md := util.MarkdownTableWithTitle(title, res.List)
+			return md, nil
+		},
+	))
+
+	// 融资融券余额走势（全市场汇总趋势），数据来源于同花顺
+	tools = append(tools, NewDataToolWrapper(
+		"GetRzrqTrend",
+		"获取融资融券余额走势数据（全市场汇总），含融资余额、融资净买入、上证收盘价及涨幅的时间序列。数据来源于同花顺。",
+		map[string]*schema.ParameterInfo{},
+		func(args string) (string, error) {
+			res := data.NewMarketNewsApi().RzrqTrend("", "")
+			if res == nil || len(res.Items) == 0 {
+				return "无符合条件的数据", nil
+			}
+			var b strings.Builder
+			b.WriteString(fmt.Sprintf("\n## 融资融券余额走势(全市场汇总)\n"))
+			b.WriteString(fmt.Sprintf("**数据更新日期**: %s\n", res.UpdateTime))
+			b.WriteString(fmt.Sprintf("**单位**: 融资余额=%s, 融资净买入=%s\n", res.RzyeUnit, res.RzjlrUnit))
+			b.WriteString(util.MarkdownTable(res.Items))
+			return b.String(), nil
 		},
 	))
 
