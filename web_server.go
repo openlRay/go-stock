@@ -25,6 +25,21 @@ import (
 //go:embed frontend/wailsjs/go/main/App.js
 var webBindingSource embed.FS
 
+// webDesktopOnlyMethods 只能由桌面 Wails 运行时执行，或由 web-bridge 使用浏览器原生
+// 能力替代。它们不进入 Web RPC 表，避免直接 HTTP 请求触发窗口、退出、更新和文件
+// 对话框能力。
+var webDesktopOnlyMethods = map[string]struct{}{
+	"CheckUpdate":        {},
+	"ExportConfig":       {},
+	"ImportSkillPackage": {},
+	"OpenURL":            {},
+	"QuitApp":            {},
+	"RestartAsAdmin":     {},
+	"SaveAsMarkdown":     {},
+	"SaveImage":          {},
+	"SaveWordFile":       {},
+}
+
 type webRPCRequest struct {
 	Method string            `json:"method"`
 	Args   []json.RawMessage `json:"args"`
@@ -196,7 +211,11 @@ func loadWebBindingMethods() (map[string]struct{}, error) {
 	}
 	methods := make(map[string]struct{}, len(matches))
 	for _, match := range matches {
-		methods[string(match[1])] = struct{}{}
+		name := string(match[1])
+		if _, desktopOnly := webDesktopOnlyMethods[name]; desktopOnly {
+			continue
+		}
+		methods[name] = struct{}{}
 	}
 	return methods, nil
 }

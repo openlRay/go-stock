@@ -9,6 +9,7 @@ import (
 	"go-stock/backend/db"
 	"go-stock/backend/logger"
 	"go-stock/backend/models"
+	"go-stock/backend/runtimepath"
 	"io"
 	"os"
 	"path/filepath"
@@ -437,21 +438,9 @@ func buildSummarizationMiddleware(ctx context.Context, chatModel model.BaseModel
 }
 
 // deepAgentRootDir 返回 DeepAgents 文件系统沙箱的根目录。
-//
-// 默认使用可执行文件所在目录（os.Executable），保证 Agent 运行所产生的
-// 临时文件（如 logs/agent_transcript.md）与 skills 目录都落在程序所在目录，
-// 不受进程启动时工作目录（os.Getwd）影响——用户从任意目录启动 go-stock
-// 都会得到一致的沙箱根。若获取可执行文件路径失败，降级到当前工作目录。
-// 未来可通过配置文件覆盖此值。
+// Web 与桌面模式通过 runtimepath 使用各自的运行目录契约。
 func deepAgentRootDir() string {
-	if exePath, err := os.Executable(); err == nil && exePath != "" {
-		return filepath.Dir(exePath)
-	}
-	// 降级：可执行文件路径不可用时回退到当前工作目录
-	if wd, err := os.Getwd(); err == nil && wd != "" {
-		return wd
-	}
-	return "."
+	return runtimepath.RootDir()
 }
 
 func errorRecoveryMiddleware() compose.ToolMiddleware {

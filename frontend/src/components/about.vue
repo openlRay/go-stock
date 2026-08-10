@@ -5,6 +5,7 @@ import {h, computed, nextTick, onBeforeUnmount, onMounted, ref} from 'vue';
 import {CheckUpdate, GetConfig, GetVersionInfo,GetUserManual,OpenURL,RestartAsAdmin} from "../../wailsjs/go/main/App";
 import {EventsOff, EventsOn,Environment} from "../../wailsjs/runtime";
 import {NAvatar, NButton, NTree, useNotification} from "naive-ui";
+import {isWebMode} from "../runtime-env";
 const updateLog = ref('');
 const versionInfo = ref('');
 const icon = ref('https://raw.githubusercontent.com/ArvinLovegood/go-stock/master/build/appicon.png');
@@ -16,6 +17,7 @@ const darkTheme = ref(false)
 const theme = computed(() => darkTheme.value ? 'dark' : 'light')
 const manualScrollRef = ref(null)
 const catalogList = ref([])
+const webMode = isWebMode
 
 const buildCatalogTree = (headings) => {
   if (!headings.length) return []
@@ -208,7 +210,7 @@ EventsOn("updateNeedAdmin", (msg) => {
               </n-badge>
             </h1>
             <n-flex justify="center">
-              <n-button size="tiny" @click="CheckUpdate(1)"  type="info" tertiary >检查更新</n-button>
+              <n-button v-if="!webMode" size="tiny" @click="CheckUpdate(1)" type="info" tertiary>检查更新</n-button>
               <n-button size="tiny" @click="openManual" type="success" tertiary >查看用户手册</n-button>
             </n-flex>
             <div style="justify-self: center;text-align: left" >

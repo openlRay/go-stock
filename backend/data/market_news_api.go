@@ -1220,19 +1220,50 @@ func (m MarketNewsApi) ClsCalendar() []any {
 	return respMap["data"].([]any)
 }
 
+func normalizeISODate(date string) (string, bool) {
+	date = strings.TrimSpace(date)
+	if date == "" {
+		return "", true
+	}
+	parsed, err := time.Parse("2006-01-02", date)
+	return date, err == nil && parsed.Format("2006-01-02") == date
+}
+
+var (
+	rzrqRankTypes = map[string]struct{}{
+		"hyList": {},
+		"gnList": {},
+		"ggList": {},
+	}
+	rzrqRankSortKeys = map[string]struct{}{
+		"jmr":          {},
+		"rzye":         {},
+		"rqye":         {},
+		"rzmre":        {},
+		"rzjmce":       {},
+		"lrye":         {},
+		"yezf":         {},
+		"close_profit": {},
+	}
+)
+
 // ConceptEventList 获取同花顺每日炒作题材事件列表
 // date 格式: 2006-01-02，为空时默认当天，接口会返回该日及之前若干天的数据
 func (m MarketNewsApi) ConceptEventList(date string) *[]models.ConceptEventDay {
-	url := "https://news.10jqka.com.cn/app/concept_v2_api/open/api/concept/event/jtcsm/v1/event/list"
-	if date != "" {
-		url += "?date=" + date
+	date, valid := normalizeISODate(date)
+	if !valid {
+		logger.SugaredLogger.Warnf("ConceptEventList invalid date: %q", date)
+		return &[]models.ConceptEventDay{}
 	}
-	resp, err := SharedHTTPClient.SetTimeout(time.Duration(30)*time.Second).R().
+	request := SharedHTTPClient.SetTimeout(time.Duration(30)*time.Second).R().
 		SetHeader("Host", "news.10jqka.com.cn").
 		SetHeader("Origin", "https://news.10jqka.com.cn").
 		SetHeader("Referer", "https://news.10jqka.com.cn/").
-		SetHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0").
-		Get(url)
+		SetHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0")
+	if date != "" {
+		request.SetQueryParam("date", date)
+	}
+	resp, err := request.Get("https://news.10jqka.com.cn/app/concept_v2_api/open/api/concept/event/jtcsm/v1/event/list")
 	if err != nil {
 		logger.SugaredLogger.Errorf("ConceptEventList err:%s", err.Error())
 		return &[]models.ConceptEventDay{}
@@ -1619,31 +1650,64 @@ func (m MarketNewsApi) GetUplimitHot(date string, limit int) map[string]any {
 // sortType: desc/asc
 // length: 返回条数
 func (m MarketNewsApi) RzrqRank(rzrqType, sortKey, sortType, date string, length, offset int) *models.RzrqRankData {
-	res := &models.RzrqRankData{Type: rzrqType}
+	rzrqType = strings.TrimSpace(rzrqType)
 	if rzrqType == "" {
+		rzrqType = "hyList"
+	}
+	res := &models.RzrqRankData{Type: rzrqType}
+	if _, ok := rzrqRankTypes[rzrqType]; !ok {
+		logger.SugaredLogger.Warnf("RzrqRank invalid type: %q", rzrqType)
 		return res
 	}
+	sortKey = strings.TrimSpace(sortKey)
 	if sortKey == "" {
 		sortKey = "jmr"
 	}
+	if _, ok := rzrqRankSortKeys[sortKey]; !ok {
+		logger.SugaredLogger.Warnf("RzrqRank invalid sort key: %q", sortKey)
+		return res
+	}
+	sortType = strings.TrimSpace(sortType)
 	if sortType == "" {
 		sortType = "desc"
 	}
+	if sortType != "asc" && sortType != "desc" {
+		logger.SugaredLogger.Warnf("RzrqRank invalid sort type: %q", sortType)
+		return res
+	}
+	date, valid := normalizeISODate(date)
+	if !valid {
+		logger.SugaredLogger.Warnf("RzrqRank invalid date: %q", date)
+		return res
+	}
 	if length <= 0 {
 		length = 5
+	} else if length > 100 {
+		length = 100
 	}
 	if offset < 0 {
 		offset = 0
+	} else if offset > 10000 {
+		logger.SugaredLogger.Warnf("RzrqRank offset too large: %d", offset)
+		return res
 	}
-	apiUrl := fmt.Sprintf("https://eq.10jqka.com.cn/rzrqEnhance/index.php?op=getRankData&type=%s&sortKey=%s&sortType=%s&length=%d&offset=%d", rzrqType, sortKey, sortType, length, offset)
+	query := map[string]string{
+		"op":       "getRankData",
+		"type":     rzrqType,
+		"sortKey":  sortKey,
+		"sortType": sortType,
+		"length":   strconv.Itoa(length),
+		"offset":   strconv.Itoa(offset),
+	}
 	if date != "" {
-		apiUrl += "&date=" + date
+		query["date"] = date
 	}
 	resp, err := SharedHTTPClient.SetTimeout(15*time.Second).R().
 		SetHeader("Host", "eq.10jqka.com.cn").
 		SetHeader("Referer", "https://eq.10jqka.com.cn/").
 		SetHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0").
-		Get(apiUrl)
+		SetQueryParams(query).
+		Get("https://eq.10jqka.com.cn/rzrqEnhance/index.php")
 	if err != nil {
 		logger.SugaredLogger.Errorf("RzrqRank err:%s", err.Error())
 		return res
@@ -1662,16 +1726,21 @@ func (m MarketNewsApi) RzrqRank(rzrqType, sortKey, sortType, date string, length
 }
 
 // RzrqTrend 获取融资融券走势数据
-// rzrqType: hyList(行业) / gnList(概念) / ggList(个股)
-// code: 板块代码或股票代码，空字符串表示全市场汇总
+// 当前上游接口仅支持全市场汇总，因此 rzrqType 和 code 必须为空。
 func (m MarketNewsApi) RzrqTrend(rzrqType, code string) *models.RzrqTrendData {
+	rzrqType = strings.TrimSpace(rzrqType)
+	code = strings.TrimSpace(code)
 	res := &models.RzrqTrendData{Type: rzrqType, Code: code}
-	apiUrl := "https://eq.10jqka.com.cn/rzrqEnhance/index.php?op=newIndexData"
+	if rzrqType != "" || code != "" {
+		logger.SugaredLogger.Warnf("RzrqTrend only supports market-wide data, type=%q code=%q", rzrqType, code)
+		return res
+	}
 	resp, err := SharedHTTPClient.SetTimeout(15*time.Second).R().
 		SetHeader("Host", "eq.10jqka.com.cn").
 		SetHeader("Referer", "https://eq.10jqka.com.cn/").
 		SetHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0").
-		Get(apiUrl)
+		SetQueryParam("op", "newIndexData").
+		Get("https://eq.10jqka.com.cn/rzrqEnhance/index.php")
 	if err != nil {
 		logger.SugaredLogger.Errorf("RzrqTrend err:%s", err.Error())
 		return res

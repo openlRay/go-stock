@@ -31,6 +31,11 @@ func TestLoadWebBindingMethods(t *testing.T) {
 			t.Fatalf("binding method %s not found", name)
 		}
 	}
+	for name := range webDesktopOnlyMethods {
+		if _, ok := methods[name]; ok {
+			t.Fatalf("desktop-only binding method %s must be hidden from Web RPC", name)
+		}
+	}
 }
 
 func TestWebBindingMethodsAreImplemented(t *testing.T) {
@@ -87,6 +92,27 @@ func TestWebRPCRejectsUnknownMethod(t *testing.T) {
 		allowedMethods: map[string]struct{}{"GetTimezone": {}},
 	}
 	body := bytes.NewBufferString(`{"method":"DeleteEverything","args":[]}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/rpc", body)
+	req.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	api.rpc(recorder, req)
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestWebRPCRejectsDesktopOnlyMethod(t *testing.T) {
+	allowedMethods, err := loadWebBindingMethods()
+	if err != nil {
+		t.Fatalf("loadWebBindingMethods() error = %v", err)
+	}
+	api := &webAPI{
+		app:            &App{webMode: true},
+		hub:            newWebEventHub(),
+		allowedMethods: allowedMethods,
+	}
+	body := bytes.NewBufferString(`{"method":"QuitApp","args":[]}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/rpc", body)
 	req.Header.Set("Content-Type", "application/json")
 	recorder := httptest.NewRecorder()

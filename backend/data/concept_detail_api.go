@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"go-stock/backend/logger"
 	"go-stock/backend/models"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -19,20 +20,28 @@ import (
 // @Desc 同花顺概念详情页数据抓取
 // -----------------------------------------------------------------------------------
 
+var thsNumericCodePattern = regexp.MustCompile(`^[0-9]{1,12}$`)
+
+func normalizeTHSNumericCode(code string) (string, bool) {
+	code = strings.TrimSpace(code)
+	return code, thsNumericCodePattern.MatchString(code)
+}
+
 // ConceptDetail 获取同花顺概念详情页数据
 // conceptCode 为概念代码（URL 中的 code，如 309269）
 // 数据来源：https://q.10jqka.com.cn/gn/detail/code/{conceptCode}/ （GBK 编码的 HTML 页面）
 func (m MarketNewsApi) ConceptDetail(conceptCode string) *models.ConceptDetailInfo {
+	conceptCode, valid := normalizeTHSNumericCode(conceptCode)
 	info := &models.ConceptDetailInfo{ConceptCode: conceptCode}
-	if conceptCode == "" {
+	if !valid {
 		return info
 	}
-	url := fmt.Sprintf("https://q.10jqka.com.cn/gn/detail/code/%s/", conceptCode)
+	requestURL := fmt.Sprintf("https://q.10jqka.com.cn/gn/detail/code/%s/", url.PathEscape(conceptCode))
 	resp, err := SharedHTTPClient.SetTimeout(15*time.Second).R().
 		SetHeader("Host", "q.10jqka.com.cn").
 		SetHeader("Referer", "https://q.10jqka.com.cn/").
 		SetHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0").
-		Get(url)
+		Get(requestURL)
 	if err != nil {
 		logger.SugaredLogger.Errorf("ConceptDetail request err: %s", err.Error())
 		return info
@@ -154,10 +163,11 @@ func (m MarketNewsApi) ConceptDetail(conceptCode string) *models.ConceptDetailIn
 // 数据来源：https://q.10jqka.com.cn/gn/detail/field/199112/order/desc/page/{page}/ajax/1/code/{conceptCode}
 // 注意：AJAX 接口可能被 chameleon 反爬拦截，此时第 1 页回退到 ConceptDetail 的 HTML 解析结果
 func (m MarketNewsApi) ConceptStocks(conceptCode string, page int) []models.ConceptStock {
-	if conceptCode == "" || page < 1 {
+	conceptCode, valid := normalizeTHSNumericCode(conceptCode)
+	if !valid || page < 1 || page > 1000 {
 		return nil
 	}
-	url := fmt.Sprintf("https://q.10jqka.com.cn/gn/detail/field/199112/order/desc/page/%d/ajax/1/code/%s", page, conceptCode)
+	requestURL := fmt.Sprintf("https://q.10jqka.com.cn/gn/detail/field/199112/order/desc/page/%d/ajax/1/code/%s", page, url.PathEscape(conceptCode))
 	resp, err := SharedHTTPClient.SetTimeout(15*time.Second).R().
 		SetHeader("Host", "q.10jqka.com.cn").
 		SetHeader("Referer", "https://q.10jqka.com.cn/").
@@ -165,7 +175,7 @@ func (m MarketNewsApi) ConceptStocks(conceptCode string, page int) []models.Conc
 		SetHeader("Accept", "*/*").
 		SetHeader("Accept-Language", "zh-CN,zh;q=0.9").
 		SetHeader("X-Requested-With", "XMLHttpRequest").
-		Get(url)
+		Get(requestURL)
 	if err != nil {
 		logger.SugaredLogger.Errorf("ConceptStocks request err: %s", err.Error())
 		return nil
@@ -242,7 +252,7 @@ func cleanMarketValue(v string) string {
 
 // ConceptKLine 获取同花顺概念板块 K 线数据
 // plateCode 为板块代码（如 886112），由 ConceptDetail 返回的 PlateCode 字段提供
-// 数据来源：http://d.10jqka.com.cn/v6/line/bk_{plateCode}/01/all.js （JSONP）
+// 数据来源：https://d.10jqka.com.cn/v6/line/bk_{plateCode}/01/all.js （JSONP）
 //
 // 响应格式：
 //
@@ -261,15 +271,16 @@ func cleanMarketValue(v string) string {
 //	因此 close = open + change
 func (m MarketNewsApi) ConceptKLine(plateCode string) *models.ConceptKLineData {
 	result := &models.ConceptKLineData{}
-	if plateCode == "" {
+	plateCode, valid := normalizeTHSNumericCode(plateCode)
+	if !valid {
 		return result
 	}
-	url := fmt.Sprintf("http://d.10jqka.com.cn/v6/line/bk_%s/01/all.js", plateCode)
+	requestURL := fmt.Sprintf("https://d.10jqka.com.cn/v6/line/bk_%s/01/all.js", url.PathEscape(plateCode))
 	resp, err := SharedHTTPClient.SetTimeout(15*time.Second).R().
 		SetHeader("Host", "d.10jqka.com.cn").
 		SetHeader("Referer", "https://q.10jqka.com.cn/").
 		SetHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0").
-		Get(url)
+		Get(requestURL)
 	if err != nil {
 		logger.SugaredLogger.Errorf("ConceptKLine request err: %s", err.Error())
 		return result
@@ -346,19 +357,20 @@ func (m MarketNewsApi) ConceptKLine(plateCode string) *models.ConceptKLineData {
 }
 
 // ConceptRealHead 获取同花顺概念板块实时行情数据
-// plateCode 为板块代码（如 886112），数据来源：http://d.10jqka.com.cn/v2/realhead/bk_{plateCode}/last.js
+// plateCode 为板块代码（如 886112），数据来源：https://d.10jqka.com.cn/v2/realhead/bk_{plateCode}/last.js
 // 响应 JSONP，外层 key 为 items，值是字段代码到数值的映射（与个股 realhead 字段一致）
 func (m MarketNewsApi) ConceptRealHead(plateCode string) *models.ConceptMarket {
 	result := &models.ConceptMarket{}
-	if plateCode == "" {
+	plateCode, valid := normalizeTHSNumericCode(plateCode)
+	if !valid {
 		return result
 	}
-	url := fmt.Sprintf("http://d.10jqka.com.cn/v2/realhead/bk_%s/last.js", plateCode)
+	requestURL := fmt.Sprintf("https://d.10jqka.com.cn/v2/realhead/bk_%s/last.js", url.PathEscape(plateCode))
 	resp, err := SharedHTTPClient.SetTimeout(15*time.Second).R().
 		SetHeader("Host", "d.10jqka.com.cn").
 		SetHeader("Referer", "https://q.10jqka.com.cn/").
 		SetHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0").
-		Get(url)
+		Get(requestURL)
 	if err != nil {
 		logger.SugaredLogger.Errorf("ConceptRealHead request err: %s", err.Error())
 		return result
@@ -563,16 +575,17 @@ func (m MarketNewsApi) GetAllIndustryPlates() []IndustryPlate {
 // 数据来源：https://q.10jqka.com.cn/thshy/detail/code/{industryCode}/ （GBK 编码的 HTML 页面）
 // 行业详情页结构与概念详情页基本一致，差异：行业页无板块定义文本
 func (m MarketNewsApi) IndustryDetail(industryCode string) *models.ConceptDetailInfo {
+	industryCode, valid := normalizeTHSNumericCode(industryCode)
 	info := &models.ConceptDetailInfo{ConceptCode: industryCode}
-	if industryCode == "" {
+	if !valid {
 		return info
 	}
-	url := fmt.Sprintf("https://q.10jqka.com.cn/thshy/detail/code/%s/", industryCode)
+	requestURL := fmt.Sprintf("https://q.10jqka.com.cn/thshy/detail/code/%s/", url.PathEscape(industryCode))
 	resp, err := SharedHTTPClient.SetTimeout(15*time.Second).R().
 		SetHeader("Host", "q.10jqka.com.cn").
 		SetHeader("Referer", "https://q.10jqka.com.cn/").
 		SetHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:140.0) Gecko/20100101 Firefox/140.0").
-		Get(url)
+		Get(requestURL)
 	if err != nil {
 		logger.SugaredLogger.Errorf("IndustryDetail request err: %s", err.Error())
 		return info
