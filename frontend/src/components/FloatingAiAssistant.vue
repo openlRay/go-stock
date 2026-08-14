@@ -760,9 +760,12 @@ function ensureSummaryEvent() {
 }
 
 const PROMPT_TEMPLATES_CHANGED = 'promptTemplatesChanged'
+const AI_CONFIGS_CHANGED = 'aiConfigsChanged'
+let stopAIConfigsChangedListener = () => {}
 onBeforeUnmount(() => {
   EventsOff(AI_ASSISTANT_EVENT)
   EventsOff(PROMPT_TEMPLATES_CHANGED)
+  stopAIConfigsChangedListener()
   hasSummaryEvent = false
 })
 
@@ -772,6 +775,32 @@ function loadPromptTemplates() {
     sysPromptTemplates.value = list.filter(t => t.type === '模型系统Prompt')
     userPromptTemplates.value = list.filter(t => t.type === '模型用户Prompt')
   })
+}
+
+async function loadAiConfigOptions() {
+  let res
+  try {
+    res = await GetAiConfigs()
+  } catch (error) {
+    console.error('GetAiConfigs error:', error)
+    return
+  }
+  const list = Array.isArray(res) ? res : []
+  aiConfigOptions.value = list.map((c, index) => {
+    const id = c.ID != null ? Number(c.ID) : (c.id != null ? Number(c.id) : index)
+    const name = c.name ?? c.Name ?? ''
+    const modelName = c.modelName ?? c.ModelName ?? ''
+    return {label: name + (modelName ? ' [' + modelName + ']' : ''), value: id}
+  })
+  if (!aiConfigOptions.value.length) {
+    aiConfigId.value = null
+    return
+  }
+  const current = Number(aiConfigId.value)
+  const lastModelId = Number(localStorage.getItem(STORAGE_KEY_MODEL_ID))
+  aiConfigId.value = aiConfigOptions.value.some(opt => opt.value === current)
+    ? current
+    : (aiConfigOptions.value.some(opt => opt.value === lastModelId) ? lastModelId : aiConfigOptions.value[0].value)
 }
 
 watch(panelVisible, (v) => {
@@ -788,31 +817,9 @@ onBeforeMount(()=> {
 } )
 onMounted(() => {
   EventsOn(PROMPT_TEMPLATES_CHANGED, loadPromptTemplates)
+  stopAIConfigsChangedListener = EventsOn(AI_CONFIGS_CHANGED, loadAiConfigOptions)
   loadHistory()
-  GetAiConfigs().then(res => {
-    const list = Array.isArray(res) ? res : []
-    aiConfigOptions.value = list.map((c, index) => {
-      const id = c.ID != null ? Number(c.ID) : (c.id != null ? Number(c.id) : index)
-      const name = c.name ?? c.Name ?? ''
-      const modelName = c.modelName ?? c.ModelName ?? ''
-      return {
-        label: name + (modelName ? ' [' + modelName + ']' : ''),
-        value: id
-      }
-    })
-    if (aiConfigOptions.value.length) {
-      // 优先使用 localStorage 中保存的上一次模型 ID
-      const lastModelId = localStorage.getItem(STORAGE_KEY_MODEL_ID)
-      if (lastModelId) {
-        const foundId = Number(lastModelId)
-        // 检查该 ID 是否仍然可用
-        const isValid = aiConfigOptions.value.some(opt => opt.value === foundId)
-        aiConfigId.value = isValid ? foundId : aiConfigOptions.value[0].value
-      } else {
-        aiConfigId.value = aiConfigOptions.value[0].value
-      }
-    }
-  })
+  loadAiConfigOptions()
   loadPromptTemplates()
   GetVersionInfo().then(res => {
     if (res?.icon) appIcon.value = res.icon

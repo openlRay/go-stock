@@ -319,6 +319,108 @@ func shouldHandleToolCalls(finishReason string) bool {
 	}
 }
 
+func buildAIRequestParameters(o *OpenAi, sessionThinkingEnabled bool) (map[string]any, error) {
+	params, _, err := ResolveEffectiveAIParameters(o.AIConfig, sessionThinkingEnabled)
+	if err != nil {
+		return nil, err
+	}
+	body := make(map[string]any)
+	if params.Temperature != nil {
+		body["temperature"] = *params.Temperature
+	}
+	if params.MaxTokens > 0 && params.MaxCompletionTokens == nil {
+		body["max_tokens"] = params.MaxTokens
+	}
+	if params.MaxCompletionTokens != nil {
+		body["max_completion_tokens"] = *params.MaxCompletionTokens
+	}
+	if params.TopP != nil {
+		body["top_p"] = *params.TopP
+	}
+	if params.TopK != nil {
+		body["top_k"] = *params.TopK
+	}
+	if params.PresencePenalty != nil {
+		body["presence_penalty"] = *params.PresencePenalty
+	}
+	if params.FrequencyPenalty != nil {
+		body["frequency_penalty"] = *params.FrequencyPenalty
+	}
+	if params.Seed != nil {
+		body["seed"] = *params.Seed
+	}
+	if len(params.StopSequences) > 0 {
+		body["stop"] = params.StopSequences
+	}
+	if params.ResponseFormat == "json_object" {
+		body["response_format"] = map[string]any{"type": "json_object"}
+	}
+	if params.ReasoningMode == ReasoningModeOff {
+		return body, nil
+	}
+
+	switch params.Provider {
+	case AIProviderOpenAI:
+		if params.ReasoningEffort != "" {
+			body["reasoning_effort"] = params.ReasoningEffort
+		}
+	case AIProviderOpenRouter:
+		reasoning := map[string]any{}
+		if params.ReasoningMode == ReasoningModeOn {
+			reasoning["enabled"] = true
+		}
+		if params.ReasoningEffort != "" {
+			reasoning["effort"] = params.ReasoningEffort
+		}
+		if params.ReasoningBudget != nil {
+			reasoning["max_tokens"] = *params.ReasoningBudget
+		}
+		body["reasoning"] = reasoning
+	case AIProviderVolcArk:
+		thinkingType := "auto"
+		if params.ReasoningMode == ReasoningModeOn {
+			thinkingType = "enabled"
+		}
+		body["thinking"] = map[string]any{"type": thinkingType}
+		if params.ReasoningEffort != "" {
+			body["reasoning_effort"] = params.ReasoningEffort
+		}
+	case AIProviderGemini:
+		thinking := map[string]any{"includeThoughts": true}
+		if params.ReasoningEffort != "" {
+			thinking["thinkingLevel"] = strings.ToUpper(params.ReasoningEffort)
+		}
+		if params.ReasoningBudget != nil {
+			thinking["thinkingBudget"] = *params.ReasoningBudget
+		}
+		body["thinkingConfig"] = thinking
+	case AIProviderAnthropic:
+		thinking := map[string]any{}
+		if params.ReasoningMode == ReasoningModeAuto {
+			thinking["type"] = "adaptive"
+		} else {
+			thinking["type"] = "enabled"
+			if params.ReasoningBudget != nil {
+				thinking["budget_tokens"] = *params.ReasoningBudget
+			}
+		}
+		body["thinking"] = thinking
+	case AIProviderDeepSeek:
+		body["thinking"] = map[string]any{"type": "enabled"}
+	case AIProviderDashScope:
+		body["enable_thinking"] = true
+	case AIProviderOllama:
+		body["think"] = true
+	}
+	return body, nil
+}
+
+func mergeAIRequestParameters(body map[string]any, parameters map[string]any) {
+	for key, value := range parameters {
+		body[key] = value
+	}
+}
+
 func AskAi(o *OpenAi, err error, messages []map[string]interface{}, ch chan map[string]any, question string, think bool) {
 	if o.TimeOut <= 0 {
 		o.TimeOut = 300
@@ -335,11 +437,6 @@ func AskAi(o *OpenAi, err error, messages []map[string]interface{}, ch chan map[
 	baseURL, chatPath := openAIChatEndpoint(o.BaseUrl)
 	client.SetBaseURL(baseURL)
 
-	thinking := "disabled"
-	if think {
-		thinking = "enabled"
-	}
-
 	if !think {
 		messages = stripReasoningContent(messages)
 	}
@@ -349,17 +446,12 @@ func AskAi(o *OpenAi, err error, messages []map[string]interface{}, ch chan map[
 		"stream":   true,
 		"messages": messages,
 	}
-	if o.Temperature > 0 {
-		bodyMap["temperature"] = o.Temperature
+	parameters, parameterErr := buildAIRequestParameters(o, think)
+	if parameterErr != nil {
+		ch <- map[string]any{"code": 0, "question": question, "content": parameterErr.Error()}
+		return
 	}
-	if o.MaxTokens > 0 {
-		bodyMap["max_tokens"] = o.MaxTokens
-	}
-	if think {
-		bodyMap["thinking"] = map[string]any{
-			"type": thinking,
-		}
-	}
+	mergeAIRequestParameters(bodyMap, parameters)
 
 	req := client.R().
 		SetDoNotParseResponse(true).
@@ -564,17 +656,12 @@ func AskAiWithToolsDepth(o *OpenAi, err error, messages []map[string]interface{}
 		"messages": messages,
 		"tools":    tools,
 	}
-	if o.Temperature > 0 {
-		bodyMap["temperature"] = o.Temperature
+	parameters, parameterErr := buildAIRequestParameters(o, thinkingMode)
+	if parameterErr != nil {
+		ch <- map[string]any{"code": 0, "question": question, "content": parameterErr.Error()}
+		return
 	}
-	if o.MaxTokens > 0 {
-		bodyMap["max_tokens"] = o.MaxTokens
-	}
-	if thinkingMode {
-		bodyMap["thinking"] = map[string]any{
-			"type": "enabled",
-		}
-	}
+	mergeAIRequestParameters(bodyMap, parameters)
 
 	reqBody, _ := json.Marshal(bodyMap)
 	if len(reqBody) > 100000 {

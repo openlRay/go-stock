@@ -21,6 +21,9 @@ This directory contains guidelines for backend development. Fill in each file wi
 | [Logging Guidelines](./logging-guidelines.md) | Structured logging, log levels | To fill |
 | [Web Runtime and Docker Contract](./web-runtime.md) | Web build tags, RPC/SSE boundary, and persistent runtime paths | Active |
 | [Feishu Webhook Signing](./feishu-webhook.md) | Custom bot signature generation, raw-message signing, and safe validation | Active |
+| [AI Model Configuration Contract](./ai-model-configuration.md) | Capability-driven fields, immediate CRUD, reasoning overrides, and request mapping | Active |
+| [Announcement AI Analysis Contract](./announcement-ai-analysis.md) | Source-only PDF analysis, context preflight, one-request streaming, and latest-result persistence | Active |
+| [Cron Schedule Editor Contract](./cron-schedule-editor.md) | Common schedules, optional AI filling, expert Cron, bindings, and fixed China Standard Time | Active |
 
 ---
 

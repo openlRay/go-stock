@@ -17,7 +17,6 @@ import (
 	"github.com/cloudwego/eino/flow/agent"
 	"github.com/cloudwego/eino/flow/agent/react"
 	"github.com/cloudwego/eino/schema"
-	"github.com/samber/lo"
 )
 
 type StockAiAgent struct {
@@ -45,9 +44,7 @@ func (receiver StockAiAgent) newStockAiAgent(ctx *context.Context, aiConfigId in
 		return nil
 	}
 
-	aiConfig, ok := lo.Find(settingConfig.AiConfigs, func(item *data.AIConfig) bool {
-		return uint(aiConfigId) == item.ID
-	})
+	aiConfig, ok := settingConfig.ResolveAIConfig(aiConfigId)
 	if !ok {
 		logger.SugaredLogger.Errorf("ai config not found for id: %d", aiConfigId)
 		return nil
@@ -57,12 +54,12 @@ func (receiver StockAiAgent) newStockAiAgent(ctx *context.Context, aiConfigId in
 		return nil
 	}
 
-	aiConfig.Thinking = thinkingMode
+	requestConfig := data.WithSessionThinkingOverride(*aiConfig, thinkingMode)
 	// 记忆模式不区分模型配置，所有 AI 配置共享同一份对话上下文。
 	// sessionIDOverride（如飞书机器人按 chat+user 区分）仍可在 ChatWithContext 中覆盖。
 	sessionID := "default"
 
-	agentInstance := GetStockAiAgent(ctx, *aiConfig, question, agentMode)
+	agentInstance := GetStockAiAgent(ctx, requestConfig, question, agentMode)
 	if agentInstance == nil {
 		logger.SugaredLogger.Errorf("failed to create agent for config id: %d", aiConfigId)
 		return nil
@@ -71,7 +68,7 @@ func (receiver StockAiAgent) newStockAiAgent(ctx *context.Context, aiConfigId in
 	return &StockAiAgent{
 		instance:     agentInstance,
 		sessionID:    sessionID,
-		aiConfigId:   aiConfigId,
+		aiConfigId:   int(aiConfig.ID),
 		question:     question,
 		thinkingMode: thinkingMode,
 	}
@@ -153,9 +150,7 @@ func (receiver StockAiAgent) ChatWithContext(ctx context.Context, question strin
 		sysPrompt += buildAgentTimeContext()
 
 		settingConfig := data.GetSettingConfig()
-		aiConfig, _ := lo.Find(settingConfig.AiConfigs, func(item *data.AIConfig) bool {
-			return uint(aiConfigId) == item.ID
-		})
+		aiConfig, _ := settingConfig.ResolveAIConfig(aiConfigId)
 		maxInputTokens := 0
 		if aiConfig != nil {
 			maxInputTokens = getMaxInputTokens(aiConfig.MaxTokens)
@@ -706,16 +701,13 @@ func createFallbackReactAgent(ctx context.Context, stockAiAgent *StockAiAgent, t
 		return nil
 	}
 
-	aiConfig, ok := lo.Find(settingConfig.AiConfigs, func(item *data.AIConfig) bool {
-		return uint(stockAiAgent.aiConfigId) == item.ID
-	})
+	aiConfig, ok := settingConfig.ResolveAIConfig(stockAiAgent.aiConfigId)
 	if !ok || aiConfig == nil {
 		logger.SugaredLogger.Errorf("createFallbackReactAgent: ai config not found for id: %d", stockAiAgent.aiConfigId)
 		return nil
 	}
 
-	cfg := *aiConfig
-	cfg.Thinking = thinkingMode
+	cfg := data.WithSessionThinkingOverride(*aiConfig, thinkingMode)
 
 	toolableChatModel, err := createChatModel(ctx, cfg)
 	if err != nil {

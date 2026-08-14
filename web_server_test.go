@@ -6,6 +6,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"encoding/json"
+	"go-stock/backend/models"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -26,7 +27,10 @@ func TestLoadWebBindingMethods(t *testing.T) {
 	if err != nil {
 		t.Fatalf("loadWebBindingMethods() error = %v", err)
 	}
-	for _, name := range []string{"GetConfig", "GetStockList", "SummaryStockNews"} {
+	for _, name := range []string{
+		"GetConfig", "GetStockList", "SummaryStockNews",
+		"GetAnnouncementAIAnalysis", "StartAnnouncementAIAnalysis", "AbortAnnouncementAIAnalysis",
+	} {
 		if _, ok := methods[name]; !ok {
 			t.Fatalf("binding method %s not found", name)
 		}
@@ -35,6 +39,45 @@ func TestLoadWebBindingMethods(t *testing.T) {
 		if _, ok := methods[name]; ok {
 			t.Fatalf("desktop-only binding method %s must be hidden from Web RPC", name)
 		}
+	}
+}
+
+func TestWebAnnouncementEventSerialization(t *testing.T) {
+	hub := newWebEventHub()
+	client := hub.subscribe()
+	defer hub.unsubscribe(client)
+
+	hub.Emit(models.AnnouncementAIEventName, models.AnnouncementAIAnalysisEvent{
+		RequestID: "req-1",
+		ArtCode:   "AN202608130001",
+		Phase:     models.AnnouncementAIPhasePreflight,
+		Preflight: &models.AnnouncementAIPreflight{
+			EstimatedTotalTokens: 12000,
+			ContextWindow:        200000,
+			CapacitySource:       "未知模型默认 200,000 Token",
+			UsedDefaultCapacity:  true,
+			Allowed:              true,
+		},
+	})
+
+	select {
+	case payload := <-client:
+		var event webEvent
+		if err := json.Unmarshal(payload, &event); err != nil {
+			t.Fatalf("json.Unmarshal() error = %v", err)
+		}
+		if event.Name != models.AnnouncementAIEventName || len(event.Data) != 1 {
+			t.Fatalf("event = %+v", event)
+		}
+		encoded, err := json.Marshal(event.Data[0])
+		if err != nil {
+			t.Fatalf("json.Marshal() error = %v", err)
+		}
+		if !strings.Contains(string(encoded), `"requestId":"req-1"`) || !strings.Contains(string(encoded), `"usedDefaultCapacity":true`) {
+			t.Fatalf("serialized payload = %s", encoded)
+		}
+	default:
+		t.Fatal("announcement event not broadcast")
 	}
 }
 

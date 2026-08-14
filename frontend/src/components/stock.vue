@@ -894,12 +894,8 @@ onBeforeMount(() => {
 
   }).catch(err => { console.error("GetPromptTemplates error:", err) })
 
-  GetAiConfigs().then(res => {
-    aiConfigs.value = res
-    if (res && res.length > 0) {
-      data.aiConfigId = res[0].ID
-    }
-  }).catch(err => { console.error("GetAiConfigs error:", err) })
+  loadStockAiConfigs()
+  stopAIConfigsChangedListener = EventsOn('aiConfigsChanged', loadStockAiConfigs)
 
   EventsOn("loadingDone", (data) => {
     message.loading("刷新股票基础数据...")
@@ -1220,10 +1216,25 @@ onBeforeUnmount(() => {
   EventsOff("updateNeedAdmin")
   EventsOff("warnMsg")
   EventsOff("loadingDone")
+  stopAIConfigsChangedListener()
 
   cleanupDraggableTabs()
 
 })
+
+async function loadStockAiConfigs() {
+  try {
+    const res = await GetAiConfigs()
+    const list = Array.isArray(res) ? res : []
+    const current = Number(data.aiConfigId)
+    aiConfigs.value = list
+    data.aiConfigId = list.some(item => Number(item.ID) === current) ? current : (list[0]?.ID ?? null)
+  } catch (err) {
+    console.error('GetAiConfigs error:', err)
+  }
+}
+
+let stopAIConfigsChangedListener = () => {}
 
 //判断是否是A股交易时间
 function isTradingTime() {

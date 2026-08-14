@@ -63,20 +63,33 @@ func (receiver Settings) TableName() string {
 }
 
 type AIConfig struct {
-	ID               uint `gorm:"primarykey"`
-	CreatedAt        time.Time
-	UpdatedAt        time.Time
-	Name             string  `json:"name"`
-	BaseUrl          string  `json:"baseUrl"`
-	ApiKey           string  `json:"apiKey" `
-	ModelName        string  `json:"modelName"`
-	MaxTokens        int     `json:"maxTokens"`
-	Temperature      float64 `json:"temperature"`
-	TimeOut          int     `json:"timeOut"`
-	HttpProxy        string  `json:"httpProxy"`
-	HttpProxyEnabled bool    `json:"httpProxyEnabled"`
-	SessionId        string  `json:"sessionId" gorm:"index;size:64"`
-	Thinking         bool    `json:"thinking"`
+	ID                    uint `gorm:"primarykey"`
+	CreatedAt             time.Time
+	UpdatedAt             time.Time
+	Name                  string   `json:"name"`
+	BaseUrl               string   `json:"baseUrl"`
+	ApiKey                string   `json:"apiKey"`
+	ModelName             string   `json:"modelName"`
+	MaxTokens             int      `json:"maxTokens"`
+	MaxCompletionTokens   *int     `json:"maxCompletionTokens"`
+	Temperature           float64  `json:"temperature"`
+	TemperatureConfigured bool     `json:"temperatureConfigured"`
+	TopP                  *float64 `json:"topP"`
+	TopK                  *int     `json:"topK"`
+	PresencePenalty       *float64 `json:"presencePenalty"`
+	FrequencyPenalty      *float64 `json:"frequencyPenalty"`
+	Seed                  *int64   `json:"seed"`
+	StopSequences         []string `json:"stopSequences" gorm:"serializer:json"`
+	ResponseFormat        string   `json:"responseFormat"`
+	ReasoningMode         string   `json:"reasoningMode"`
+	ReasoningEffort       string   `json:"reasoningEffort"`
+	ReasoningBudget       *int     `json:"reasoningBudget"`
+	TimeOut               int      `json:"timeOut"`
+	HttpProxy             string   `json:"httpProxy"`
+	HttpProxyEnabled      bool     `json:"httpProxyEnabled"`
+	SessionId             string   `json:"sessionId" gorm:"index;size:64"`
+	Thinking              bool     `json:"thinking"`
+	IsDefault             bool     `json:"isDefault" gorm:"column:is_default;not null;default:false"`
 }
 
 func (AIConfig) TableName() string {
@@ -89,15 +102,21 @@ type SettingConfig struct {
 }
 
 func (c *SettingConfig) GetAIConfigThinking(aiConfigId int) bool {
-	if aiConfigId <= 0 && len(c.AiConfigs) > 0 {
-		return c.AiConfigs[0].Thinking
+	config, ok := c.ResolveAIConfig(aiConfigId)
+	if !ok {
+		return false
 	}
-	for _, cfg := range c.AiConfigs {
-		if int(cfg.ID) == aiConfigId {
-			return cfg.Thinking
-		}
+	return EffectiveReasoningEnabled(config)
+}
+
+// ResolveAIConfig keeps explicit selections stable while providing one shared
+// fallback order for callers that do not specify a model: persisted default,
+// then the legacy first configuration.
+func (c *SettingConfig) ResolveAIConfig(aiConfigId int) (*AIConfig, bool) {
+	if c == nil {
+		return nil, false
 	}
-	return false
+	return ResolveAIConfig(c.AiConfigs, aiConfigId)
 }
 
 type SettingsApi struct {
@@ -194,6 +213,8 @@ func UpdateConfig(s *SettingConfig) string {
 }
 
 func updateAiConfigs(aiConfigs []*AIConfig) error {
+	aiConfigDefaultMu.Lock()
+	defer aiConfigDefaultMu.Unlock()
 	// nil 表示调用方不希望更新 AI 配置（保留现有配置）；
 	// 空 slice（len==0）才表示清空所有 AI 配置
 	if aiConfigs == nil {
@@ -205,6 +226,18 @@ func updateAiConfigs(aiConfigs []*AIConfig) error {
 			return err
 		}
 		return db.Dao.Exec("DELETE FROM sqlite_sequence WHERE name='ai_config'").Error
+	}
+	for _, item := range aiConfigs {
+		if item != nil && item.ID == 0 {
+			// Bulk/import compatibility must not create a second default. The
+			// invariant is normalized transactionally after persistence.
+			item.IsDefault = false
+		}
+	}
+	for _, item := range aiConfigs {
+		if err := ValidateAIConfig(item); err != nil {
+			return err
+		}
 	}
 	// 仅收集大于 0 的 ID，用于识别已存在的配置；
 	// ID<=0 视为“新配置”，强制走插入逻辑，避免多个 ID 为 0 的配置互相覆盖。
@@ -235,19 +268,7 @@ func updateAiConfigs(aiConfigs []*AIConfig) error {
 			addAiConfigs = append(addAiConfigs, item)
 		} else {
 			notDeleteIds = append(notDeleteIds, item.ID)
-			e = db.Dao.Model(&AIConfig{}).Where("id=?", item.ID).Updates(map[string]interface{}{
-				"name":               item.Name,
-				"base_url":           item.BaseUrl,
-				"api_key":            item.ApiKey,
-				"model_name":         item.ModelName,
-				"max_tokens":         item.MaxTokens,
-				"temperature":        item.Temperature,
-				"time_out":           item.TimeOut,
-				"http_proxy":         item.HttpProxy,
-				"http_proxy_enabled": item.HttpProxyEnabled,
-				"session_id":         item.SessionId,
-				"thinking":           item.Thinking,
-			}).Error
+			e = db.Dao.Model(&AIConfig{}).Where("id=?", item.ID).Updates(aiConfigUpdateMap(item)).Error
 			if e != nil {
 				return
 			}
@@ -265,8 +286,13 @@ func updateAiConfigs(aiConfigs []*AIConfig) error {
 	}
 	//logger.SugaredLogger.Infof("更新aiConfigs +%d", len(addAiConfigs))
 	//批量新增的配置
-	err = db.Dao.CreateInBatches(addAiConfigs, len(addAiConfigs)).Error
-	return err
+	if len(addAiConfigs) > 0 {
+		err = db.Dao.CreateInBatches(addAiConfigs, len(addAiConfigs)).Error
+		if err != nil {
+			return err
+		}
+	}
+	return ensureSingleDefaultAIConfig(db.Dao)
 }
 
 // UpdateAiConfigsOnly 仅更新 AI 模型服务配置，不影响其他设置项
@@ -293,7 +319,7 @@ func GetSettingConfig() *SettingConfig {
 	}
 	// AI 配置始终查询，不依赖 OpenAiEnable 开关：
 	// AI 配置管理页面、飞书机器人、AI 助手等独立功能可能在 OpenAiEnable=false 时也需要读取已保存的配置
-	result := db.Dao.Model(&AIConfig{}).Find(&aiConfigs)
+	result := db.Dao.Model(&AIConfig{}).Order("id ASC").Find(&aiConfigs)
 	if result.Error != nil {
 		logger.SugaredLogger.Error("查询AI配置失败:", result.Error)
 	} else if len(aiConfigs) > 0 {
@@ -301,6 +327,7 @@ func GetSettingConfig() *SettingConfig {
 			if item.TimeOut <= 0 {
 				item.TimeOut = 60 * 5
 			}
+			NormalizeLegacyAIConfig(item)
 		})
 	}
 	if settings.OpenAiEnable {

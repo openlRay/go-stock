@@ -52,6 +52,9 @@ type App struct {
 	summaryCancel      context.CancelFunc
 	agentMu            sync.Mutex
 	agentCancel        context.CancelFunc
+	announcementMu     sync.Mutex
+	announcementCancel context.CancelFunc
+	announcementReqID  string
 	stockAlertMu       sync.Mutex
 	stockAlertLastSent map[string]time.Time
 	priceAtAlertReset  map[string]float64
@@ -63,7 +66,7 @@ type App struct {
 func NewApp() *App {
 	cacheSize := 512 * 1024
 	cache := freecache.NewCache(cacheSize)
-	c := cron.New(cron.WithSeconds(), cron.WithChain(cron.Recover(cron.DefaultLogger)))
+	c := newAppCron()
 	c.Start()
 	var tools []data.Tool
 	tools = data.Tools(tools)
@@ -75,6 +78,15 @@ func NewApp() *App {
 		stockAlertLastSent: make(map[string]time.Time),
 		priceAtAlertReset:  make(map[string]float64),
 	}
+}
+
+func newAppCron() *cron.Cron {
+	cronLocation, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		logger.SugaredLogger.Warnf("加载定时任务时区失败，回退到本地时区：%v", err)
+		cronLocation = time.Local
+	}
+	return cron.New(cron.WithSeconds(), cron.WithLocation(cronLocation), cron.WithChain(cron.Recover(cron.DefaultLogger)))
 }
 
 func (a *App) setCronEntry(key string, id cron.EntryID) {
@@ -2823,6 +2835,31 @@ func (a *App) GetAiConfigs() []*data.AIConfig {
 // UpdateAiConfigs 仅更新 AI 模型服务配置，供独立的 AI 模型服务管理页面调用
 func (a *App) UpdateAiConfigs(aiConfigs []*data.AIConfig) string {
 	return data.UpdateAiConfigsOnly(aiConfigs)
+}
+
+/** 获取 AI 模型能力 */
+func (a *App) GetAIModelCapabilities(baseURL, modelName string) data.AIModelCapabilities {
+	return data.GetAIModelCapabilities(baseURL, modelName)
+}
+
+/** 创建 AIConfig */
+func (a *App) CreateAIConfig(config *data.AIConfig) (*data.AIConfig, error) {
+	return data.CreateAIConfig(config)
+}
+
+/** 更新 AIConfig */
+func (a *App) UpdateAIConfig(config *data.AIConfig) (*data.AIConfig, error) {
+	return data.UpdateAIConfig(config)
+}
+
+/** 复制 AIConfig */
+func (a *App) CopyAIConfig(id uint) (*data.AIConfig, error) {
+	return data.CopyAIConfig(id)
+}
+
+/** 删除 AIConfig */
+func (a *App) DeleteAIConfig(id uint) (*data.DeleteAIConfigResult, error) {
+	return data.DeleteAIConfig(id)
 }
 
 // GetAiAssistantSession 获取 AI 助手会话消息列表，sessionId 为空时获取最新的

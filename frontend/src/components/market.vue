@@ -127,6 +127,7 @@ const enableTools= ref(true)
 const thinkingMode = ref(true)
 const treemapRef = ref(null);
 let treemapchart =null;
+let stopAIConfigsChangedListener = () => {}
 
 function getIndex() {
   GlobalStockIndexes().then((res) => {
@@ -153,10 +154,8 @@ onBeforeMount(() => {
     userPromptOptions.value = promptTemplates.value.filter(item => item.type === '模型用户Prompt')
   })
 
-  GetAiConfigs().then(res=>{
-    aiConfigs.value = res
-    aiConfigId.value = res[0].ID
-  })
+  loadMarketAiConfigs()
+  stopAIConfigsChangedListener = EventsOn('aiConfigsChanged', loadMarketAiConfigs)
   GetTelegraphList("财联社电报").then((res) => {
     telegraphList.value = res
   })
@@ -191,11 +190,24 @@ onBeforeUnmount(() => {
   EventsOff("newTelegraph")
   EventsOff("newSinaNews")
   EventsOff("summaryStockNews")
+  stopAIConfigsChangedListener()
   stopTradingTimers()
   if (tradingCheckInterval.value) {
     clearInterval(tradingCheckInterval.value)
   }
 })
+
+async function loadMarketAiConfigs() {
+  try {
+    const res = await GetAiConfigs()
+    const list = Array.isArray(res) ? res : []
+    const current = Number(aiConfigId.value)
+    aiConfigs.value = list
+    aiConfigId.value = list.some(item => Number(item.ID) === current) ? current : (list[0]?.ID ?? null)
+  } catch (error) {
+    console.error('GetAiConfigs error:', error)
+  }
+}
 
 function startTradingTimers() {
   stopTradingTimers()
@@ -765,7 +777,7 @@ function ReFlesh(source) {
         <StockResearchReportList :stock-code="stockCode"/>
       </n-tab-pane>
       <n-tab-pane name="公司公告" tab="公司公告 ">
-        <StockNoticeList :stock-code="stockCode" />
+        <StockNoticeList :stock-code="stockCode" :dark-theme="darkTheme" />
       </n-tab-pane>
       <n-tab-pane name="行业研究" tab="行业研究 ">
         <IndustryResearchReportList/>

@@ -16,6 +16,17 @@ import (
 	"gorm.io/gorm"
 )
 
+const cronTaskTimezone = "Asia/Shanghai"
+
+func cronTaskLocation() *time.Location {
+	location, err := time.LoadLocation(cronTaskTimezone)
+	if err != nil {
+		logger.SugaredLogger.Warnf("加载定时任务时区失败，回退到本地时区：%v", err)
+		return time.Local
+	}
+	return location
+}
+
 type CronTaskApi struct{}
 
 func NewCronTaskApi() *CronTaskApi {
@@ -155,7 +166,7 @@ func (a *CronTaskApi) CalculateNextRunTimes(cronExpr string, count int) []time.T
 	}
 
 	times := make([]time.Time, 0, count)
-	next := time.Now()
+	next := time.Now().In(cronTaskLocation())
 	for i := 0; i < count; i++ {
 		next = schedule.Next(next)
 		times = append(times, next)
@@ -225,9 +236,9 @@ func (a *CronTaskApi) executeTaskByType(ctx context.Context, task *models.CronTa
 func (a *CronTaskApi) CalculateNextRunTime(cronExpr string) time.Time {
 	schedule, err := cron.NewParser(cron.Second | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow).Parse(cronExpr)
 	if err != nil {
-		return time.Now().Add(time.Hour)
+		return time.Now().In(cronTaskLocation()).Add(time.Hour)
 	}
-	return schedule.Next(time.Now())
+	return schedule.Next(time.Now().In(cronTaskLocation()))
 }
 
 func (a *CronTaskApi) executeStockAnalysis(ctx context.Context, task *models.CronTask) error {

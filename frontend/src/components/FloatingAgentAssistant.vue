@@ -1484,6 +1484,34 @@ watch(panelVisible, (v) => {
   }
 })
 
+async function loadAiConfigOptions() {
+  let res
+  try {
+    res = await GetAiConfigs()
+  } catch (error) {
+    console.error('GetAiConfigs error:', error)
+    return
+  }
+  const list = Array.isArray(res) ? res : []
+  aiConfigOptions.value = list.map((c, index) => {
+    const id = c.ID != null ? Number(c.ID) : (c.id != null ? Number(c.id) : index)
+    const name = c.name ?? c.Name ?? ''
+    const modelName = c.modelName ?? c.ModelName ?? ''
+    return {label: name + (modelName ? ' [' + modelName + ']' : ''), value: id}
+  })
+  if (!aiConfigOptions.value.length) {
+    aiConfigId.value = null
+    return
+  }
+  const current = Number(aiConfigId.value)
+  const lastModelId = Number(localStorage.getItem(STORAGE_KEY_MODEL_ID))
+  aiConfigId.value = aiConfigOptions.value.some(opt => opt.value === current)
+    ? current
+    : (aiConfigOptions.value.some(opt => opt.value === lastModelId) ? lastModelId : aiConfigOptions.value[0].value)
+}
+
+let stopAIConfigsChangedListener = () => {}
+
 onBeforeMount(() => {
   GetConfig().then(result => {
     darkTheme.value = result.darkTheme
@@ -1492,29 +1520,9 @@ onBeforeMount(() => {
 
 onMounted(() => {
   EventsOn(AGENT_EVENT, onAgentMessage)
+  stopAIConfigsChangedListener = EventsOn('aiConfigsChanged', loadAiConfigOptions)
   loadHistory()
-  GetAiConfigs().then(res => {
-    const list = Array.isArray(res) ? res : []
-    aiConfigOptions.value = list.map((c, index) => {
-      const id = c.ID != null ? Number(c.ID) : (c.id != null ? Number(c.id) : index)
-      const name = c.name ?? c.Name ?? ''
-      const modelName = c.modelName ?? c.ModelName ?? ''
-      return {
-        label: name + (modelName ? ' [' + modelName + ']' : ''),
-        value: id
-      }
-    })
-    if (aiConfigOptions.value.length) {
-      const lastModelId = localStorage.getItem(STORAGE_KEY_MODEL_ID)
-      if (lastModelId) {
-        const foundId = Number(lastModelId)
-        const isValid = aiConfigOptions.value.some(opt => opt.value === foundId)
-        aiConfigId.value = isValid ? foundId : aiConfigOptions.value[0].value
-      } else {
-        aiConfigId.value = aiConfigOptions.value[0].value
-      }
-    }
-  })
+  loadAiConfigOptions()
   loadPromptTemplates()
 })
 
@@ -1540,6 +1548,7 @@ watch(agentMode, (v) => {
 
 onBeforeUnmount(() => {
   EventsOff(AGENT_EVENT)
+  stopAIConfigsChangedListener()
 })
 </script>
 

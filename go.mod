@@ -31,6 +31,7 @@ require (
 	github.com/go-toast/toast v0.0.0-20190211030409-01e6764cf0a4
 	github.com/inconshreveable/go-update v0.0.0-20160112193335-8152e7eb6ccf
 	github.com/larksuite/oapi-sdk-go/v3 v3.9.7
+	github.com/ledongthuc/pdf v0.0.0-20250511090121-5959a4027728
 	github.com/lib4u/fake-useragent v1.0.6
 	github.com/mark3labs/mcp-go v0.54.1
 	github.com/robertkrimen/otto v0.5.1

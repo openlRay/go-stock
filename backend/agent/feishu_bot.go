@@ -58,8 +58,8 @@ func NewFeishuBot() *FeishuBot {
 		return nil
 	}
 	aiConfigId := cfg.FeishuBotAiConfigId
-	if aiConfigId <= 0 && len(cfg.AiConfigs) > 0 {
-		aiConfigId = int(cfg.AiConfigs[0].ID)
+	if resolved, ok := cfg.ResolveAIConfig(aiConfigId); ok {
+		aiConfigId = int(resolved.ID)
 	}
 	if aiConfigId <= 0 {
 		logger.SugaredLogger.Warnf("feishu bot config missing: no ai config id")
@@ -405,8 +405,8 @@ func (b *FeishuBot) askDirectWithTools(ctx context.Context, question, sessionID 
 	}
 
 	aiConfigId := b.aiConfigId
-	if aiConfigId <= 0 {
-		aiConfigId = int(cfg.AiConfigs[0].ID)
+	if resolved, ok := cfg.ResolveAIConfig(aiConfigId); ok {
+		aiConfigId = int(resolved.ID)
 	}
 
 	// 独立超时（5 分钟），工具调用可能多轮
@@ -499,8 +499,8 @@ func (b *FeishuBot) askAIFallback(ctx context.Context, question string) string {
 	}
 
 	aiConfigId := b.aiConfigId
-	if aiConfigId <= 0 {
-		aiConfigId = int(cfg.AiConfigs[0].ID)
+	if resolved, ok := cfg.ResolveAIConfig(aiConfigId); ok {
+		aiConfigId = int(resolved.ID)
 	}
 
 	// 兜底调用独立超时（2 分钟），避免 Agent 已耗时较长后再卡死

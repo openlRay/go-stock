@@ -1,4 +1,52 @@
+export namespace agent {
+
+	export class CronScheduleParseRequest {
+	    text: string;
+	    aiConfigId: number;
+
+	    static createFrom(source: any = {}) {
+	        return new CronScheduleParseRequest(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.text = source["text"];
+	        this.aiConfigId = source["aiConfigId"];
+	    }
+	}
+	export class CronScheduleParseResult {
+	    mode: string;
+	    intervalValue: number;
+	    intervalUnit: string;
+	    time: string;
+	    weekdays: number[];
+	    monthDay: number;
+	    timezone: string;
+	    summary: string;
+	    cronExpr: string;
+
+	    static createFrom(source: any = {}) {
+	        return new CronScheduleParseResult(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.mode = source["mode"];
+	        this.intervalValue = source["intervalValue"];
+	        this.intervalUnit = source["intervalUnit"];
+	        this.time = source["time"];
+	        this.weekdays = source["weekdays"];
+	        this.monthDay = source["monthDay"];
+	        this.timezone = source["timezone"];
+	        this.summary = source["summary"];
+	        this.cronExpr = source["cronExpr"];
+	    }
+	}
+
+}
+
 export namespace data {
+  /** AIConfig  */
 
 	export class AIConfig {
 	    ID: number;
@@ -11,12 +59,40 @@ export namespace data {
 	    apiKey: string;
 	    modelName: string;
 	    maxTokens: number;
+      /** 最大完成token */
+	    maxCompletionTokens?: number;
 	    temperature: number;
+      /** 温度配置 */
+	    temperatureConfigured: boolean;
+      /** 顶部P */
+	    topP?: number;
+      /** 顶部K */
+	    topK?: number;
+      /** 存在惩罚 */
+	    presencePenalty?: number;
+      /** 频率惩罚 */
+	    frequencyPenalty?: number;
+      /** 种子 */
+	    seed?: number;
+      /** 停止序列 */
+	    stopSequences: string[];
+      /** 响应格式 */
+	    responseFormat: string;
+      /** 推理模式 */
+	    reasoningMode: string;
+      /** 推理努力 */
+	    reasoningEffort: string;
+      /** 推理预算 */
+	    reasoningBudget?: number;
+      /** 超时 */
 	    timeOut: number;
+      /** 代理 */
 	    httpProxy: string;
+      /** 代理启用 */
 	    httpProxyEnabled: boolean;
 	    sessionId: string;
 	    thinking: boolean;
+	    isDefault: boolean;
 
 	    static createFrom(source: any = {}) {
 	        return new AIConfig(source);
@@ -32,12 +108,25 @@ export namespace data {
 	        this.apiKey = source["apiKey"];
 	        this.modelName = source["modelName"];
 	        this.maxTokens = source["maxTokens"];
+	        this.maxCompletionTokens = source["maxCompletionTokens"];
 	        this.temperature = source["temperature"];
+	        this.temperatureConfigured = source["temperatureConfigured"];
+	        this.topP = source["topP"];
+	        this.topK = source["topK"];
+	        this.presencePenalty = source["presencePenalty"];
+	        this.frequencyPenalty = source["frequencyPenalty"];
+	        this.seed = source["seed"];
+	        this.stopSequences = source["stopSequences"];
+	        this.responseFormat = source["responseFormat"];
+	        this.reasoningMode = source["reasoningMode"];
+	        this.reasoningEffort = source["reasoningEffort"];
+	        this.reasoningBudget = source["reasoningBudget"];
 	        this.timeOut = source["timeOut"];
 	        this.httpProxy = source["httpProxy"];
 	        this.httpProxyEnabled = source["httpProxyEnabled"];
 	        this.sessionId = source["sessionId"];
 	        this.thinking = source["thinking"];
+	        this.isDefault = source["isDefault"];
 	    }
 
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -58,6 +147,143 @@ export namespace data {
 		    return a;
 		}
 	}
+  /** AIConfigReference  */
+	export class AIConfigReference {
+	    type: string;
+	    sourceId: number;
+	    sourceName: string;
+	    detail: string;
+
+	    static createFrom(source: any = {}) {
+	        return new AIConfigReference(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.type = source["type"];
+	        this.sourceId = source["sourceId"];
+	        this.sourceName = source["sourceName"];
+	        this.detail = source["detail"];
+	    }
+	}
+	export class AIParameterOption {
+	    label: string;
+	    value: string;
+
+	    static createFrom(source: any = {}) {
+	        return new AIParameterOption(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.label = source["label"];
+	        this.value = source["value"];
+	    }
+	}
+	export class AIParameterCapability {
+	    supported: boolean;
+	    label: string;
+	    description: string;
+	    min?: number;
+	    max?: number;
+	    step?: number;
+	    options?: AIParameterOption[];
+
+	    static createFrom(source: any = {}) {
+	        return new AIParameterCapability(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.supported = source["supported"];
+	        this.label = source["label"];
+	        this.description = source["description"];
+	        this.min = source["min"];
+	        this.max = source["max"];
+	        this.step = source["step"];
+	        this.options = this.convertValues(source["options"], AIParameterOption);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class AIModelCapabilities {
+	    profile: string;
+	    providerName: string;
+	    maxTokens: AIParameterCapability;
+	    maxCompletionTokens: AIParameterCapability;
+	    temperature: AIParameterCapability;
+	    topP: AIParameterCapability;
+	    topK: AIParameterCapability;
+	    presencePenalty: AIParameterCapability;
+	    frequencyPenalty: AIParameterCapability;
+	    seed: AIParameterCapability;
+	    stopSequences: AIParameterCapability;
+	    responseFormat: AIParameterCapability;
+	    reasoningMode: AIParameterCapability;
+	    reasoningEffort: AIParameterCapability;
+	    reasoningBudget: AIParameterCapability;
+	    warnings: string[];
+
+	    static createFrom(source: any = {}) {
+	        return new AIModelCapabilities(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.profile = source["profile"];
+	        this.providerName = source["providerName"];
+	        this.maxTokens = this.convertValues(source["maxTokens"], AIParameterCapability);
+	        this.maxCompletionTokens = this.convertValues(source["maxCompletionTokens"], AIParameterCapability);
+	        this.temperature = this.convertValues(source["temperature"], AIParameterCapability);
+	        this.topP = this.convertValues(source["topP"], AIParameterCapability);
+	        this.topK = this.convertValues(source["topK"], AIParameterCapability);
+	        this.presencePenalty = this.convertValues(source["presencePenalty"], AIParameterCapability);
+	        this.frequencyPenalty = this.convertValues(source["frequencyPenalty"], AIParameterCapability);
+	        this.seed = this.convertValues(source["seed"], AIParameterCapability);
+	        this.stopSequences = this.convertValues(source["stopSequences"], AIParameterCapability);
+	        this.responseFormat = this.convertValues(source["responseFormat"], AIParameterCapability);
+	        this.reasoningMode = this.convertValues(source["reasoningMode"], AIParameterCapability);
+	        this.reasoningEffort = this.convertValues(source["reasoningEffort"], AIParameterCapability);
+	        this.reasoningBudget = this.convertValues(source["reasoningBudget"], AIParameterCapability);
+	        this.warnings = source["warnings"];
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+
+
 	export class AllStockInfoPageData {
 	    list: models.AllStockInfo[];
 	    total: number;
@@ -405,6 +631,40 @@ export namespace data {
 	        this.downCount = source["downCount"];
 	        this.totalCount = source["totalCount"];
 	    }
+	}
+	export class DeleteAIConfigResult {
+	    success: boolean;
+	    message: string;
+	    references: AIConfigReference[];
+
+	    static createFrom(source: any = {}) {
+	        return new DeleteAIConfigResult(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.success = source["success"];
+	        this.message = source["message"];
+	        this.references = this.convertValues(source["references"], AIConfigReference);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 	export class FundBasic {
 	    ID: number;
@@ -2556,6 +2816,98 @@ export namespace models {
 		    return a;
 		}
 	}
+	export class AnnouncementAIAnalysis {
+	    ID: number;
+	    // Go type: time
+	    CreatedAt: any;
+	    // Go type: time
+	    UpdatedAt: any;
+	    // Go type: gorm
+	    DeletedAt: any;
+	    artCode: string;
+	    stockCode: string;
+	    stockName: string;
+	    title: string;
+	    noticeType: string;
+	    noticeDate: string;
+	    pdfUrl: string;
+	    aiConfigId: number;
+	    modelName: string;
+	    promptVersion: string;
+	    instructionId: string;
+	    content: string;
+	    providerResponseId: string;
+	    // Go type: time
+	    generatedAt: any;
+
+	    static createFrom(source: any = {}) {
+	        return new AnnouncementAIAnalysis(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.ID = source["ID"];
+	        this.CreatedAt = this.convertValues(source["CreatedAt"], null);
+	        this.UpdatedAt = this.convertValues(source["UpdatedAt"], null);
+	        this.DeletedAt = this.convertValues(source["DeletedAt"], null);
+	        this.artCode = source["artCode"];
+	        this.stockCode = source["stockCode"];
+	        this.stockName = source["stockName"];
+	        this.title = source["title"];
+	        this.noticeType = source["noticeType"];
+	        this.noticeDate = source["noticeDate"];
+	        this.pdfUrl = source["pdfUrl"];
+	        this.aiConfigId = source["aiConfigId"];
+	        this.modelName = source["modelName"];
+	        this.promptVersion = source["promptVersion"];
+	        this.instructionId = source["instructionId"];
+	        this.content = source["content"];
+	        this.providerResponseId = source["providerResponseId"];
+	        this.generatedAt = this.convertValues(source["generatedAt"], null);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class AnnouncementAIAnalysisRequest {
+	    artCode: string;
+	    stockCode: string;
+	    stockName: string;
+	    title: string;
+	    noticeType: string;
+	    noticeDate: string;
+	    aiConfigId: number;
+
+	    static createFrom(source: any = {}) {
+	        return new AnnouncementAIAnalysisRequest(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.artCode = source["artCode"];
+	        this.stockCode = source["stockCode"];
+	        this.stockName = source["stockName"];
+	        this.title = source["title"];
+	        this.noticeType = source["noticeType"];
+	        this.noticeDate = source["noticeDate"];
+	        this.aiConfigId = source["aiConfigId"];
+	    }
+	}
 	export class BKFundFlow {
 	    id: number;
 	    code: string;
@@ -4094,4 +4446,3 @@ export namespace models {
 	}
 
 }
-

@@ -1,495 +1,554 @@
 <script setup>
-import {computed, h, onMounted, ref} from "vue";
+import {computed, h, onBeforeUnmount, onMounted, ref, watch} from "vue";
 import {useRouter} from "vue-router";
-import {GetAiConfigs, UpdateAiConfigs, FetchAiModels, FetchAiModelInfo} from "../../wailsjs/go/main/App";
-import {NButton, NSpace, NTag, useMessage} from "naive-ui";
+import {
+  CopyAIConfig,
+  CreateAIConfig,
+  DeleteAIConfig,
+  FetchAiModelInfo,
+  FetchAiModels,
+  GetAIModelCapabilities,
+  GetAiConfigs,
+  SetDefaultAIConfig,
+  UpdateAIConfig
+} from "../../wailsjs/go/main/App";
+import {NButton, NIcon, NSpace, NTag, NText, NTooltip, useDialog, useMessage} from "naive-ui";
 import {data} from "../../wailsjs/go/models";
-import {EventsEmit} from "../../wailsjs/runtime";
 import {ChevronLeftIcon, HelpCircleFilledIcon} from "tdesign-icons-vue-next";
 
 const message = useMessage()
+const dialog = useDialog()
 const router = useRouter()
 
-// 返回基础设置页面
-function goBackToSettings() {
-  router.push({name: 'settings'})
-}
-
-// AI 配置列表（独立加载，不依赖 settings.vue 的 formValue）
 const aiConfigs = ref([])
-const saving = ref(false)
-
-// 搜索关键字
+const listLoading = ref(false)
+const submitting = ref(false)
+const actionLoadingId = ref(0)
 const searchKeyword = ref('')
-// 分页配置
-const pagination = ref({
-  page: 1,
-  pageSize: 10,
-  showSizePicker: true,
-  pageSizes: [5, 10, 20, 50],
-  itemCount: 0,
-  prefix: ({itemCount}) => `共 ${itemCount} 条`
-})
-
-// 抽屉编辑相关
 const drawerVisible = ref(false)
-const editingIndex = ref(-1) // -1 表示新增/复制
-const editingConfig = ref(null)
-// 抽屉模式：add 新增 / copy 复制 / edit 编辑
 const drawerMode = ref('add')
-// 抽屉标题（根据模式动态切换）
-const drawerTitle = computed(() => {
-  if (drawerMode.value === 'copy') return '复制新建AI配置'
-  if (drawerMode.value === 'edit') return '编辑AI配置'
-  return '添加AI配置'
-})
+const editingConfig = ref(null)
+const capabilities = ref(null)
+const capabilitiesLoading = ref(false)
+const stopSequencesText = ref('')
+let capabilityRequestSequence = 0
+let baseUrlCapabilityTimer = null
 
-// 经过搜索过滤后的列表
+const drawerTitle = computed(() => drawerMode.value === 'edit' ? '编辑 AI 配置' : '添加 AI 配置')
 const filteredConfigs = computed(() => {
-  const keyword = (searchKeyword.value || '').trim().toLowerCase()
+  const keyword = searchKeyword.value.trim().toLowerCase()
   if (!keyword) return aiConfigs.value
-  return aiConfigs.value.filter(c => {
-    const name = (c.name || '').toLowerCase()
-    const modelName = (c.modelName || '').toLowerCase()
-    const baseUrl = (c.baseUrl || '').toLowerCase()
-    const platformName = getPlatformName(c.baseUrl).toLowerCase()
-    // 平台 label 形如 "DeepSeek (https://api.deepseek.com)"，匹配整串以支持中文别名（如"智谱AI"、"火山引擎"）
-    const platformOpt = aiPlatformOptions.find(opt => opt.value === c.baseUrl)
-    const platformLabel = platformOpt ? platformOpt.label.toLowerCase() : ''
-    return name.includes(keyword)
-      || modelName.includes(keyword)
-      || baseUrl.includes(keyword)
-      || platformName.includes(keyword)
-      || platformLabel.includes(keyword)
-  })
+  return aiConfigs.value.filter(config => [
+    config.name,
+    config.modelName,
+    config.baseUrl,
+    getPlatformName(config.baseUrl)
+  ].some(value => (value || '').toLowerCase().includes(keyword)))
 })
+const tableData = computed(() => filteredConfigs.value.map(config => ({...config, _key: config.ID})))
+const pagination = ref({page: 1, pageSize: 10, showSizePicker: true, pageSizes: [5, 10, 20, 50]})
 
-// n-data-table 所需的 data（带 key）
-const tableData = computed(() => {
-  return filteredConfigs.value.map((c, idx) => ({
-    ...c,
-    _key: c.ID || idx,
-    _index: idx
-  }))
-})
-
-// 平台选项
 const aiPlatformOptions = [
   {label: 'DeepSeek (https://api.deepseek.com)', value: 'https://api.deepseek.com'},
   {label: '硅基流动 (https://api.siliconflow.cn/v1)', value: 'https://api.siliconflow.cn/v1'},
   {label: '智谱AI(GLM) (https://open.bigmodel.cn/api/paas/v4)', value: 'https://open.bigmodel.cn/api/paas/v4'},
   {label: '智谱GLM Coding Plan (https://open.bigmodel.cn/api/coding/paas/v4)', value: 'https://open.bigmodel.cn/api/coding/paas/v4'},
   {label: '字节豆包(火山引擎) (https://ark.cn-beijing.volces.com/api/v3)', value: 'https://ark.cn-beijing.volces.com/api/v3'},
-  {label: '火山引擎Ark Plan (https://ark.cn-beijing.volces.com/api/plan/v3)', value: 'https://ark.cn-beijing.volces.com/api/plan/v3'},
-  {label: '火山引擎Ark Coding (https://ark.cn-beijing.volces.com/api/coding/v3)', value: 'https://ark.cn-beijing.volces.com/api/coding/v3'},
+  {label: '火山引擎 Ark Plan (https://ark.cn-beijing.volces.com/api/plan/v3)', value: 'https://ark.cn-beijing.volces.com/api/plan/v3'},
+  {label: '火山引擎 Ark Coding (https://ark.cn-beijing.volces.com/api/coding/v3)', value: 'https://ark.cn-beijing.volces.com/api/coding/v3'},
   {label: '阿里云百炼 (https://dashscope.aliyuncs.com/compatible-mode/v1)', value: 'https://dashscope.aliyuncs.com/compatible-mode/v1'},
   {label: '阿里云百炼 Token Plan 团队版 (https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1)', value: 'https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1'},
   {label: '阿里云百炼 Coding Plan (https://coding.dashscope.aliyuncs.com/v1)', value: 'https://coding.dashscope.aliyuncs.com/v1'},
-  {label: 'Moonshot(月之暗面) (https://api.moonshot.cn/v1)', value: 'https://api.moonshot.cn/v1'},
+  {label: 'Moonshot（月之暗面）(https://api.moonshot.cn/v1)', value: 'https://api.moonshot.cn/v1'},
   {label: '腾讯混元 (https://api.hunyuan.cloud.tencent.com/v1)', value: 'https://api.hunyuan.cloud.tencent.com/v1'},
   {label: '讯飞星火 (https://spark-api-open.xf-yun.com/v1)', value: 'https://spark-api-open.xf-yun.com/v1'},
   {label: '零一万物 (https://api.lingyiwanwu.com/v1)', value: 'https://api.lingyiwanwu.com/v1'},
   {label: 'MiniMax (https://api.minimax.chat/v1)', value: 'https://api.minimax.chat/v1'},
-  {label: '小米MiMo TokenPlan (https://token-plan-cn.xiaomimimo.com/v1)', value: 'https://token-plan-cn.xiaomimimo.com/v1'},
-  {label: '小米MiMo (https://api.xiaomimimo.com/v1)', value: 'https://api.xiaomimimo.com/v1'},
-  {label: '腾讯云TokenHub (https://tokenhub.tencentmaas.com/v1)', value: 'https://tokenhub.tencentmaas.com/v1'},
-  {label: '腾讯云Token Plan 个人版 (https://api.lkeap.cloud.tencent.com/plan/v3)', value: 'https://api.lkeap.cloud.tencent.com/plan/v3'},
-  {label: '腾讯云Coding Plan (https://api.lkeap.cloud.tencent.com/coding/v3)', value: 'https://api.lkeap.cloud.tencent.com/coding/v3'},
+  {label: '小米 MiMo TokenPlan (https://token-plan-cn.xiaomimimo.com/v1)', value: 'https://token-plan-cn.xiaomimimo.com/v1'},
+  {label: '小米 MiMo (https://api.xiaomimimo.com/v1)', value: 'https://api.xiaomimimo.com/v1'},
+  {label: '腾讯云 TokenHub (https://tokenhub.tencentmaas.com/v1)', value: 'https://tokenhub.tencentmaas.com/v1'},
+  {label: '腾讯云 Token Plan 个人版 (https://api.lkeap.cloud.tencent.com/plan/v3)', value: 'https://api.lkeap.cloud.tencent.com/plan/v3'},
+  {label: '腾讯云 Coding Plan (https://api.lkeap.cloud.tencent.com/coding/v3)', value: 'https://api.lkeap.cloud.tencent.com/coding/v3'},
   {label: 'OpenAI (https://api.openai.com/v1)', value: 'https://api.openai.com/v1'},
   {label: 'Azure OpenAI (https://YOUR_RESOURCE.openai.azure.com)', value: 'https://YOUR_RESOURCE.openai.azure.com'},
   {label: 'OpenRouter (https://openrouter.ai/api/v1)', value: 'https://openrouter.ai/api/v1'},
   {label: 'Ollama (http://localhost:11434/v1)', value: 'http://localhost:11434/v1'},
 ]
 
+const defaultConfig = () => new data.AIConfig({
+  ID: 0,
+  name: '',
+  baseUrl: 'https://api.deepseek.com',
+  apiKey: '',
+  modelName: 'deepseek-reasoner',
+  maxTokens: 8192,
+  maxCompletionTokens: null,
+  temperature: 0.1,
+  temperatureConfigured: true,
+  topP: null,
+  topK: null,
+  presencePenalty: null,
+  frequencyPenalty: null,
+  seed: null,
+  stopSequences: [],
+  responseFormat: 'text',
+  reasoningMode: 'on',
+  reasoningEffort: '',
+  reasoningBudget: null,
+  timeOut: 300,
+  httpProxy: '',
+  httpProxyEnabled: false,
+  sessionId: '',
+  thinking: true,
+  isDefault: false,
+})
+
+const capability = key => capabilities.value?.[key] || {supported: false, options: []}
+const incompatibleFields = computed(() => {
+  const config = editingConfig.value
+  if (!config || !capabilities.value) return []
+  const fields = []
+  const add = (key, label) => {
+    if (!fields.some(field => field.key === key)) fields.push({key, label})
+  }
+  const checkNumber = (key, value, label) => {
+    if (value === null || value === undefined) return
+    const descriptor = capability(key)
+    if (!descriptor.supported
+      || (descriptor.min != null && value < descriptor.min)
+      || (descriptor.max != null && value > descriptor.max)) add(key, label)
+  }
+  const checkOption = (key, value, empty, label) => {
+    if (value === empty || value === null || value === undefined) return
+    const descriptor = capability(key)
+    if (!descriptor.supported || !(descriptor.options || []).some(option => option.value === value)) add(key, label)
+  }
+  if (config.temperatureConfigured) checkNumber('temperature', config.temperature, 'Temperature')
+  checkNumber('maxCompletionTokens', config.maxCompletionTokens, '最大完成 Token')
+  checkNumber('topP', config.topP, 'Top P')
+  checkNumber('topK', config.topK, 'Top K')
+  checkNumber('presencePenalty', config.presencePenalty, '存在惩罚')
+  checkNumber('frequencyPenalty', config.frequencyPenalty, '频率惩罚')
+  if (config.seed != null && !capability('seed').supported) add('seed', '随机种子')
+  if (!capability('stopSequences').supported && (config.stopSequences || []).length) add('stopSequences', '停止序列')
+  checkOption('responseFormat', config.responseFormat, 'text', '输出格式')
+  checkOption('reasoningMode', config.reasoningMode, 'off', '推理模式')
+  checkOption('reasoningEffort', config.reasoningEffort, '', '推理强度')
+  checkNumber('reasoningBudget', config.reasoningBudget, '推理预算')
+  return fields
+})
+
+function HelpLabel(props) {
+  return h(NSpace, {align: 'center', size: 4}, () => [
+    h('span', props.text),
+    h(NTooltip, {placement: 'top'}, {
+      trigger: () => h(NIcon, {size: 16, color: '#2080f0'}, () => h(HelpCircleFilledIcon)),
+      default: () => h('div', {style: 'max-width: 360px; white-space: normal;'}, props.help)
+    })
+  ])
+}
+
 function getPlatformName(baseUrl) {
-  if (!baseUrl) return ''
-  const platform = aiPlatformOptions.find(opt => opt.value === baseUrl)
-  if (platform) {
-    const idx = platform.label.indexOf(' (')
-    return idx > 0 ? platform.label.substring(0, idx) : platform.label
-  }
-  return ''
+  const option = aiPlatformOptions.find(item => item.value === baseUrl)
+  if (!option) return ''
+  const index = option.label.indexOf(' (')
+  return index > 0 ? option.label.slice(0, index) : option.label
 }
 
-function onBaseUrlChange(aiConfig, newBaseUrl) {
-  const platformName = getPlatformName(newBaseUrl)
-  if (platformName && aiConfig.name && !aiConfig.name.startsWith(platformName)) {
-    aiConfig.name = platformName + '-' + aiConfig.name
-  } else if (platformName && !aiConfig.name) {
-    aiConfig.name = platformName
-  }
+function goBackToSettings() {
+  router.push({name: 'settings'})
 }
 
-function onModelNameChange(aiConfig, newModelName) {
-  if (!newModelName) return
-  const platformName = getPlatformName(aiConfig.baseUrl)
-  const baseName = platformName || 'AI'
-
-  if (!aiConfig.name) {
-    aiConfig.name = baseName + '-' + newModelName
-  } else if (aiConfig.name === platformName) {
-    aiConfig.name = platformName + '-' + newModelName
-  } else {
-    const parts = aiConfig.name.split('-')
-    if (parts.length >= 2 && parts[0] === platformName) {
-      parts[parts.length - 1] = newModelName
-      aiConfig.name = parts.join('-')
-    } else if (!aiConfig.name.endsWith(newModelName)) {
-      aiConfig.name = aiConfig.name + '-' + newModelName
-    }
-  }
-
-  fetchModelInfo(aiConfig, newModelName)
-}
-
-async function fetchAiModels(aiConfig) {
-  if (!aiConfig.baseUrl || !aiConfig.apiKey) {
-    message.warning('请先填写接口地址和 apiKey')
-    return
-  }
-  if (aiConfig._loadingModels) {
-    return
-  }
-  aiConfig._loadingModels = true
-  try {
-    const list = await FetchAiModels(aiConfig.baseUrl, aiConfig.apiKey)
-    const options = (list || []).map(id => ({label: id, value: id}))
-    aiConfig._modelOptions = options
-    if (!aiConfig.modelName && options.length > 0) {
-      aiConfig.modelName = options[0].value
-      onModelNameChange(aiConfig, aiConfig.modelName)
-    }
-    if (!options.length) {
-      message.warning('未从接口获取到可用模型，请检查地址和 apiKey')
-    }
-  } catch (e) {
-    console.error('FetchAiModels error', e)
-    message.error('获取模型列表失败，请检查接口地址和 apiKey')
-  } finally {
-    aiConfig._loadingModels = false
-  }
-}
-
-async function fetchModelInfo(aiConfig, modelName) {
-  if (!modelName || !aiConfig.baseUrl) return
-  try {
-    const info = await FetchAiModelInfo(aiConfig.baseUrl, aiConfig.apiKey || '', modelName)
-    if (info && info.maxTokens > 0) {
-      aiConfig.maxTokens = info.maxTokens
-      const sourceLabel = info.source === 'api' ? 'API' : '内置数据'
-      message.success(`已自动设置 ${modelName} 的 MaxTokens 为 ${info.maxTokens}（来源：${sourceLabel}）`)
-    }
-  } catch (e) {
-    console.error('FetchAiModelInfo error', e)
-  }
-}
-
-// 打开新增抽屉
 function openAddDrawer() {
-  editingIndex.value = -1
   drawerMode.value = 'add'
-  editingConfig.value = new data.AIConfig({
-    name: '',
-    baseUrl: 'https://api.deepseek.com',
-    apiKey: '',
-    modelName: 'deepseek-reasoner',
-    temperature: 0.1,
-    maxTokens: 8192,
-    timeOut: 6000,
-    httpProxy: "",
-    httpProxyEnabled: false,
-    thinking: true,
-  })
+  editingConfig.value = defaultConfig()
+  stopSequencesText.value = ''
   drawerVisible.value = true
+  loadCapabilities()
 }
 
-// 基于已有配置快速复制新建（清空 ID，名称加「-副本」后缀）
-function openCopyDrawer(row) {
-  editingIndex.value = -1
-  drawerMode.value = 'copy'
-  const copy = JSON.parse(JSON.stringify(row))
-  copy.ID = 0
-  copy.name = (copy.name || '') + '-副本'
-  // 清空模型列表缓存，避免沿用旧配置的模型选项
-  delete copy._modelOptions
-  delete copy._loadingModels
-  editingConfig.value = copy
-  drawerVisible.value = true
-}
-
-// 打开编辑抽屉
 function openEditDrawer(row) {
-  editingIndex.value = row._index
   drawerMode.value = 'edit'
-  // 深拷贝避免直接修改原对象
   editingConfig.value = JSON.parse(JSON.stringify(row))
+  stopSequencesText.value = (editingConfig.value.stopSequences || []).join('\n')
   drawerVisible.value = true
+  loadCapabilities()
 }
 
-// 保存抽屉中的配置（写入列表，不立即调后端）
-function applyDrawerConfig() {
-  const c = editingConfig.value
-  if (!c.name || !c.baseUrl || !c.apiKey || !c.modelName) {
-    message.warning('名称/接口地址/apiKey/模型名称未填写完整')
+function updateNameFromBaseUrl(value) {
+  const platform = getPlatformName(value)
+  if (platform && !editingConfig.value.name) editingConfig.value.name = platform
+}
+
+function onBaseUrlInput(value) {
+  updateNameFromBaseUrl(value)
+  if (baseUrlCapabilityTimer) clearTimeout(baseUrlCapabilityTimer)
+  baseUrlCapabilityTimer = setTimeout(() => {
+    baseUrlCapabilityTimer = null
+    loadCapabilities()
+  }, 350)
+}
+
+function onBaseUrlSelect(value) {
+  updateNameFromBaseUrl(value)
+  if (baseUrlCapabilityTimer) {
+    clearTimeout(baseUrlCapabilityTimer)
+    baseUrlCapabilityTimer = null
+  }
+  loadCapabilities()
+}
+
+function onModelNameChange(value) {
+  if (!value) return
+  const platform = getPlatformName(editingConfig.value.baseUrl) || 'AI'
+  if (!editingConfig.value.name || editingConfig.value.name === platform) {
+    editingConfig.value.name = `${platform}-${value}`
+  }
+  loadCapabilities()
+  fetchModelInfo(value)
+}
+
+async function loadCapabilities() {
+  if (!editingConfig.value) return
+  const request = ++capabilityRequestSequence
+  capabilitiesLoading.value = true
+  try {
+    const result = await GetAIModelCapabilities(editingConfig.value.baseUrl || '', editingConfig.value.modelName || '')
+    if (request === capabilityRequestSequence) capabilities.value = result
+  } catch (error) {
+    if (request === capabilityRequestSequence) message.error(`读取模型能力失败：${error}`)
+  } finally {
+    if (request === capabilityRequestSequence) capabilitiesLoading.value = false
+  }
+}
+
+async function fetchAiModels() {
+  const config = editingConfig.value
+  if (!config.baseUrl || !config.apiKey) {
+    message.warning('请先填写接口地址和 API Key')
     return
   }
-  if (editingIndex.value === -1) {
-    aiConfigs.value.push(c)
-  } else {
-    aiConfigs.value[editingIndex.value] = c
-  }
-  drawerVisible.value = false
-}
-
-// 从列表中删除
-function removeConfig(row) {
-  const idx = aiConfigs.value.findIndex(c => (c.ID && c.ID === row.ID) || c === row)
-  if (idx >= 0) {
-    aiConfigs.value.splice(idx, 1)
+  config._loadingModels = true
+  try {
+    const models = await FetchAiModels(config.baseUrl, config.apiKey)
+    config._modelOptions = (models || []).map(value => ({label: value, value}))
+    if (!config._modelOptions.length) message.warning('未获取到模型，请检查地址和 API Key，或手动输入模型名称')
+  } catch (error) {
+    message.error(`获取模型列表失败：${error}`)
+  } finally {
+    config._loadingModels = false
   }
 }
 
-// 表格列定义
+async function fetchModelInfo(modelName) {
+  if (!modelName || !editingConfig.value?.baseUrl) return
+  try {
+    const info = await FetchAiModelInfo(editingConfig.value.baseUrl, editingConfig.value.apiKey || '', modelName)
+    if (info?.maxTokens > 0 && !editingConfig.value.maxTokens) editingConfig.value.maxTokens = info.maxTokens
+  } catch (error) {
+    console.debug('FetchAiModelInfo failed', error)
+  }
+}
+
+function clearIncompatibleFields() {
+  const config = editingConfig.value
+  for (const field of incompatibleFields.value) {
+    if (field.key === 'stopSequences') {
+      config.stopSequences = []
+      stopSequencesText.value = ''
+    } else if (field.key === 'temperature') {
+      config.temperatureConfigured = false
+      config.temperature = 0
+    } else if (field.key === 'responseFormat') config.responseFormat = 'text'
+    else if (field.key === 'reasoningMode') {
+      config.reasoningMode = 'off'
+      config.reasoningEffort = ''
+      config.reasoningBudget = null
+    } else if (field.key === 'reasoningEffort') config.reasoningEffort = ''
+    else config[field.key] = null
+  }
+  message.info('已清除不兼容参数，请检查后再保存')
+}
+
+function buildSavePayload() {
+  const payload = JSON.parse(JSON.stringify(editingConfig.value))
+  delete payload._loadingModels
+  delete payload._modelOptions
+  delete payload._key
+  payload.stopSequences = stopSequencesText.value.split('\n').map(value => value.trim()).filter(Boolean)
+  payload.thinking = payload.reasoningMode !== 'off'
+  if (!payload.temperatureConfigured) payload.temperature = 0
+  return payload
+}
+
+async function saveConfig() {
+  if (submitting.value) return
+  const config = editingConfig.value
+  if (!config.name || !config.baseUrl || !config.apiKey || !config.modelName) {
+    message.warning('名称、接口地址、API Key 和模型名称均为必填项')
+    return
+  }
+  if (incompatibleFields.value.length) {
+    message.warning('请先处理当前模型不支持的旧参数')
+    return
+  }
+  submitting.value = true
+  try {
+    const payload = buildSavePayload()
+    if (drawerMode.value === 'edit') await UpdateAIConfig(payload)
+    else await CreateAIConfig(payload)
+    await loadAiConfigs()
+    drawerVisible.value = false
+    message.success('保存成功，配置已生效')
+  } catch (error) {
+    message.error(`保存失败：${error}`)
+  } finally {
+    submitting.value = false
+  }
+}
+
+function confirmCopy(row) {
+  dialog.warning({
+    title: '复制 AI 配置',
+    content: `确认复制“${row.name}”吗？确认后将立即创建一个独立副本。`,
+    positiveText: '确认复制',
+    negativeText: '取消',
+    onPositiveClick: async () => {
+      actionLoadingId.value = row.ID
+      try {
+        const copied = await CopyAIConfig(row.ID)
+        await loadAiConfigs()
+        message.success(`已创建“${copied.name}”`)
+      } catch (error) {
+        message.error(`复制失败：${error}`)
+      } finally {
+        actionLoadingId.value = 0
+      }
+    }
+  })
+}
+
+function showDeleteReferences(result) {
+  dialog.warning({
+    title: '无法删除：配置仍被引用',
+    content: () => h(NSpace, {vertical: true}, () => [
+      h(NText, null, () => result.message),
+      ...(result.references || []).map(reference => h(NTag, {type: 'warning', bordered: false}, () => `${reference.sourceName}：${reference.detail}`))
+    ]),
+    positiveText: '知道了'
+  })
+}
+
+function confirmDelete(row) {
+  dialog.warning({
+    title: '删除 AI 配置',
+    content: `确认删除“${row.name}”吗？此操作不可撤销。`,
+    positiveText: '确认删除',
+    negativeText: '取消',
+    onPositiveClick: async () => {
+      actionLoadingId.value = row.ID
+      try {
+        const result = await DeleteAIConfig(row.ID)
+        if (!result.success) {
+          showDeleteReferences(result)
+          return
+        }
+        await loadAiConfigs()
+        message.success('删除成功，配置已生效')
+      } catch (error) {
+        message.error(`删除失败：${error}`)
+      } finally {
+        actionLoadingId.value = 0
+      }
+    }
+  })
+}
+
+async function setDefaultConfig(row) {
+  if (row.isDefault || actionLoadingId.value) return
+  actionLoadingId.value = row.ID
+  try {
+    await SetDefaultAIConfig(row.ID)
+    await loadAiConfigs()
+    message.success(`已将“${row.name}”设为全局默认模型`)
+  } catch (error) {
+    message.error(`设置默认模型失败：${error}`)
+  } finally {
+    actionLoadingId.value = 0
+  }
+}
+
 const columns = [
-  {title: '配置名称', key: 'name', resizable: true, minWidth: 160},
-  {
-    title: '接口平台',
-    key: 'baseUrl',
-    resizable: true,
-    minWidth: 180,
-    render(row) {
-      const name = getPlatformName(row.baseUrl)
-      return h('span', name || row.baseUrl)
-    }
-  },
-  {title: '模型', key: 'modelName', resizable: true, minWidth: 160},
-  {
-    title: '深度思考',
-    key: 'thinking',
-    width: 100,
-    align: 'center',
-    render(row) {
-      return h(NTag, {type: row.thinking ? 'success' : 'default', size: 'small', bordered: false},
-        () => row.thinking ? '开启' : '关闭')
-    }
-  },
-  {
-    title: 'http代理',
-    key: 'httpProxyEnabled',
-    width: 100,
-    align: 'center',
-    render(row) {
-      return h(NTag, {type: row.httpProxyEnabled ? 'warning' : 'default', size: 'small', bordered: false},
-        () => row.httpProxyEnabled ? '开启' : '关闭')
-    }
-  },
-  {
-    title: 'MaxTokens',
-    key: 'maxTokens',
-    width: 110,
-    align: 'right'
-  },
-  {
-    title: '操作',
-    key: 'actions',
-    width: 200,
-    fixed: 'right',
-    render(row) {
-      return h(NSpace, {size: 4}, () => [
-        h(NButton, {
-          size: 'small',
-          type: 'primary',
-          ghost: true,
-          onClick: () => openEditDrawer(row)
-        }, () => '编辑'),
-        h(NButton, {
-          size: 'small',
-          type: 'info',
-          ghost: true,
-          onClick: () => openCopyDrawer(row)
-        }, () => '复制'),
-        h(NButton, {
-          size: 'small',
-          type: 'error',
-          ghost: true,
-          onClick: () => removeConfig(row)
-        }, () => '删除')
-      ])
-    }
-  }
+  {title: '配置名称', key: 'name', minWidth: 190, resizable: true, render: row => h(NSpace, {size: 6, align: 'center'}, () => [
+    h(NText, null, () => row.name),
+    row.isDefault ? h(NTag, {type: 'success', size: 'small', bordered: false}, () => '默认') : null
+  ])},
+  {title: '接口平台', key: 'baseUrl', minWidth: 180, resizable: true, render: row => getPlatformName(row.baseUrl) || row.baseUrl},
+  {title: '模型', key: 'modelName', minWidth: 170, resizable: true},
+  {title: '推理模式', key: 'reasoningMode', width: 100, render: row => {
+    const enabled = (row.reasoningMode || (row.thinking ? 'on' : 'off')) !== 'off'
+    return h(NTag, {type: enabled ? 'success' : 'default', size: 'small', bordered: false}, () => enabled ? '开启' : '关闭')
+  }},
+  {title: '最大 Token', key: 'maxTokens', width: 110},
+  {title: '操作', key: 'actions', width: 290, fixed: 'right', render: row => h(NSpace, {size: 4}, () => [
+    h(NButton, {size: 'small', type: 'success', ghost: true, disabled: row.isDefault || !!actionLoadingId.value, loading: actionLoadingId.value === row.ID, onClick: () => setDefaultConfig(row)}, () => row.isDefault ? '当前默认' : '设为默认'),
+    h(NButton, {size: 'small', type: 'primary', ghost: true, disabled: actionLoadingId.value === row.ID, onClick: () => openEditDrawer(row)}, () => '编辑'),
+    h(NButton, {size: 'small', type: 'info', ghost: true, loading: actionLoadingId.value === row.ID, onClick: () => confirmCopy(row)}, () => '复制'),
+    h(NButton, {size: 'small', type: 'error', ghost: true, loading: actionLoadingId.value === row.ID, onClick: () => confirmDelete(row)}, () => '删除')
+  ])}
 ]
 
-// 行 key
-function rowKey(row) {
-  return row._key
+async function loadAiConfigs() {
+  listLoading.value = true
+  try {
+    aiConfigs.value = await GetAiConfigs() || []
+  } catch (error) {
+    message.error(`加载 AI 配置失败：${error}`)
+  } finally {
+    listLoading.value = false
+  }
 }
 
-// 搜索时回到第一页
-function onSearchInput() {
-  pagination.value.page = 1
-}
+watch(() => editingConfig.value?.reasoningMode, mode => {
+  if (!editingConfig.value) return
+  if (mode === 'off') {
+    editingConfig.value.reasoningEffort = ''
+    editingConfig.value.reasoningBudget = null
+  }
+})
 
-// 分页变化
-function onPageChange(page) {
-  pagination.value.page = page
-}
-
-function onPageSizeChange(pageSize) {
-  pagination.value.pageSize = pageSize
-  pagination.value.page = 1
-}
-
-// 保存全部配置到后端
-function saveAiConfigs() {
-  if (saving.value) return
-  saving.value = true
-  UpdateAiConfigs(aiConfigs.value).then(res => {
-    if (res === '保存成功！') {
-      message.success(res)
-      EventsEmit("updateSettings")
-    } else {
-      message.error(res)
-    }
-  }).catch(e => {
-    message.error('保存失败：' + e)
-  }).finally(() => {
-    saving.value = false
-  })
-}
-
-function loadAiConfigs() {
-  GetAiConfigs().then(res => {
-    aiConfigs.value = res || []
-  })
-}
-
-onMounted(() => {
-  loadAiConfigs()
+onMounted(loadAiConfigs)
+onBeforeUnmount(() => {
+  if (baseUrlCapabilityTimer) clearTimeout(baseUrlCapabilityTimer)
 })
 </script>
 
 <template>
-  <n-flex justify="left" style="text-align: left; --wails-draggable:no-drag">
-    <n-form :label-placement="'left'" :label-align="'left'" style="width: 100%;">
-      <n-space vertical size="large" style="width: 100%;">
-        <n-card size="small">
-          <template #header>
-            <n-space align="center" size="small">
-              <n-button quaternary circle size="tiny" @click="goBackToSettings" title="返回基础设置">
-                <template #icon>
-                  <n-icon><ChevronLeftIcon/></n-icon>
-                </template>
-              </n-button>
-              <n-tag type="primary" :bordered="false">AI模型服务配置</n-tag>
-            </n-space>
-          </template>
-          <template #header-extra>
-            <n-space>
-              <n-button type="primary" dashed @click="openAddDrawer">+ 添加AI配置</n-button>
-              <n-button type="primary" strong :loading="saving" @click="saveAiConfigs">保存配置</n-button>
-            </n-space>
-          </template>
-          <n-space vertical size="medium">
-            <n-text depth="3" style="font-size: 12px;">
-              管理 AI 模型服务接口配置（可添加多个，用于 AI 诊股、飞书机器人、AI 助手等功能）。支持按名称/模型/接口地址搜索，分页展示。修改后请点击「保存配置」。
-            </n-text>
-            <n-input
-              v-model:value="searchKeyword"
-              placeholder="搜索：配置名称 / 平台 / 模型名称 / 接口地址"
-              clearable
-              @update:value="onSearchInput"
-              style="max-width: 480px;"
-            />
-            <n-data-table
-              :columns="columns"
-              :data="tableData"
-              :row-key="rowKey"
-              :pagination="pagination"
-              :bordered="false"
-              :single-line="false"
-              size="small"
-              style="height: calc(100vh - 280px);"
-              @update:page="onPageChange"
-              @update:page-size="onPageSizeChange"
-            />
-          </n-space>
-        </n-card>
+  <n-flex style="text-align: left; --wails-draggable:no-drag">
+    <n-card size="small" style="width: 100%">
+      <template #header>
+        <n-space align="center" size="small">
+          <n-button quaternary circle size="tiny" title="返回基础设置" @click="goBackToSettings">
+            <template #icon><n-icon><ChevronLeftIcon/></n-icon></template>
+          </n-button>
+          <n-tag type="primary" :bordered="false">AI 模型服务配置</n-tag>
+        </n-space>
+      </template>
+      <template #header-extra>
+        <n-button type="primary" dashed @click="openAddDrawer">+ 添加 AI 配置</n-button>
+      </template>
+      <n-space vertical size="medium">
+        <n-text depth="3" style="font-size: 12px">新增、编辑、复制和删除均会在确认后立即生效。高级参数会按接口与模型能力动态展示。</n-text>
+        <n-input v-model:value="searchKeyword" placeholder="搜索配置名称 / 平台 / 模型 / 接口地址" clearable style="max-width: 480px" @update:value="pagination.page = 1"/>
+        <n-data-table :columns="columns" :data="tableData" :loading="listLoading" :row-key="row => row._key" :pagination="pagination" :bordered="false" :single-line="false" size="small" style="height: calc(100vh - 260px)"/>
       </n-space>
-    </n-form>
+    </n-card>
 
-    <!-- 编辑/新增抽屉 -->
-    <n-drawer v-model:show="drawerVisible" :width="640" placement="right">
+    <n-drawer v-model:show="drawerVisible" :width="720" placement="right">
       <n-drawer-content :title="drawerTitle" closable>
-        <n-form v-if="editingConfig" :label-placement="'left'" :label-width="120">
-          <n-form-item label="配置名称" required>
-            <n-input v-model:value="editingConfig.name" placeholder="配置名称" clearable/>
-          </n-form-item>
-          <n-form-item label="接口地址" required>
-            <n-select
-              v-model:value="editingConfig.baseUrl"
-              :options="aiPlatformOptions"
-              filterable
-              tag
-              clearable
-              placeholder="选择或输入AI接口地址"
-              @update:value="(val) => onBaseUrlChange(editingConfig, val)"
-            />
-          </n-form-item>
-          <n-form-item label="令牌(apiKey)" required>
-            <n-input type="password" v-model:value="editingConfig.apiKey" placeholder="apiKey"
-                     clearable show-password-on="click"/>
-          </n-form-item>
-          <n-form-item label="模型名称" required>
-            <n-select
-              v-model:value="editingConfig.modelName"
-              :options="editingConfig._modelOptions || []"
-              filterable
-              tag
-              :loading="editingConfig._loadingModels"
-              placeholder="点击获取模型列表或手动输入"
-              @click="fetchAiModels(editingConfig)"
-              @update:value="(val) => onModelNameChange(editingConfig, val)"
-            />
-          </n-form-item>
-          <n-form-item label="Temperature">
-            <n-input-number v-model:value="editingConfig.temperature" :step="0.1" style="width: 100%;"/>
-          </n-form-item>
-          <n-form-item label="MaxTokens">
-            <n-input-number v-model:value="editingConfig.maxTokens" style="width: 100%;"/>
-          </n-form-item>
-          <n-form-item label="Timeout(秒)">
-            <n-input-number :min="60" :step="1" v-model:value="editingConfig.timeOut" style="width: 100%;"/>
-          </n-form-item>
-          <n-form-item label="深度思考">
-            <n-space align="center">
-              <n-switch v-model:value="editingConfig.thinking"/>
-              <n-tooltip placement="top">
-                <template #trigger>
-                  <n-icon color="#0e7a0d" size="20">
-                    <HelpCircleFilledIcon/>
-                  </n-icon>
-                </template>
-                <n-gradient-text :type="'warning'">
-                  <div style="max-width: 400px;text-align: left">
-                    启用深度思考模式：<br>
-                    适用于 DeepSeek-Reasoner、MiMo-V2.5-Pro 等支持推理的模型。<br>
-                    如使用普通模型请关闭此选项
-                  </div>
-                </n-gradient-text>
-              </n-tooltip>
-            </n-space>
-          </n-form-item>
-          <n-form-item label="http代理">
-            <n-switch v-model:value="editingConfig.httpProxyEnabled"/>
-          </n-form-item>
-          <n-form-item v-if="editingConfig.httpProxyEnabled" label="http代理地址">
-            <n-input v-model:value="editingConfig.httpProxy" placeholder="http代理地址" clearable/>
-          </n-form-item>
-        </n-form>
+        <n-spin :show="capabilitiesLoading">
+          <n-form v-if="editingConfig" label-placement="left" :label-width="150">
+            <n-divider title-placement="left">基础连接</n-divider>
+            <n-form-item label="配置名称" required><n-input v-model:value="editingConfig.name" placeholder="例如：本地 GPT-5.6"/></n-form-item>
+            <n-form-item label="接口地址" required>
+              <n-auto-complete
+                v-model:value="editingConfig.baseUrl"
+                :options="aiPlatformOptions"
+                :input-props="{ autocomplete: 'off', spellcheck: false }"
+                clearable
+                placeholder="选择预设或直接输入接口地址"
+                @update:value="onBaseUrlInput"
+                @select="onBaseUrlSelect"
+              />
+            </n-form-item>
+            <n-form-item label="API Key" required><n-input v-model:value="editingConfig.apiKey" type="password" show-password-on="click" placeholder="API Key"/></n-form-item>
+            <n-form-item label="模型名称" required>
+              <n-space style="width: 100%" :wrap="false">
+                <n-select v-model:value="editingConfig.modelName" :options="editingConfig._modelOptions || []" filterable tag :loading="editingConfig._loadingModels" placeholder="输入模型名，如 gpt-5.6-sol" style="flex: 1" @update:value="onModelNameChange"/>
+                <n-button :loading="editingConfig._loadingModels" @click="fetchAiModels">获取模型</n-button>
+              </n-space>
+            </n-form-item>
+            <n-alert v-if="capabilities" type="info" :show-icon="false" style="margin-bottom: 12px">当前能力档案：{{ capabilities.providerName }}</n-alert>
+
+            <n-divider title-placement="left">生成参数</n-divider>
+            <n-form-item v-if="capability('temperature').supported">
+              <template #label><HelpLabel text="Temperature" :help="capability('temperature').description"/></template>
+              <n-input-number :value="editingConfig.temperatureConfigured ? editingConfig.temperature : null" clearable :min="capability('temperature').min" :max="capability('temperature').max" :step="capability('temperature').step || 0.1" style="width: 100%" @update:value="value => { editingConfig.temperatureConfigured = value !== null; editingConfig.temperature = value ?? 0 }"/>
+            </n-form-item>
+            <n-form-item>
+              <template #label><HelpLabel text="最大输出 Token" :help="capability('maxTokens').description"/></template>
+              <n-input-number v-model:value="editingConfig.maxTokens" :min="1" :step="1" style="width: 100%"/>
+            </n-form-item>
+            <n-form-item v-if="capability('maxCompletionTokens').supported">
+              <template #label><HelpLabel text="最大完成 Token" :help="capability('maxCompletionTokens').description"/></template>
+              <n-input-number v-model:value="editingConfig.maxCompletionTokens" clearable :min="capability('maxCompletionTokens').min" :max="capability('maxCompletionTokens').max" :step="1" style="width: 100%"/>
+            </n-form-item>
+            <n-form-item v-if="capability('topP').supported">
+              <template #label><HelpLabel text="Top P" :help="capability('topP').description"/></template>
+              <n-input-number v-model:value="editingConfig.topP" clearable :min="capability('topP').min" :max="capability('topP').max" :step="capability('topP').step" style="width: 100%"/>
+            </n-form-item>
+            <n-form-item v-if="capability('topK').supported">
+              <template #label><HelpLabel text="Top K" :help="capability('topK').description"/></template>
+              <n-input-number v-model:value="editingConfig.topK" clearable :min="capability('topK').min" :max="capability('topK').max" style="width: 100%"/>
+            </n-form-item>
+            <n-form-item v-if="capability('presencePenalty').supported">
+              <template #label><HelpLabel text="存在惩罚" :help="capability('presencePenalty').description"/></template>
+              <n-input-number v-model:value="editingConfig.presencePenalty" clearable :min="-2" :max="2" :step="0.1" style="width: 100%"/>
+            </n-form-item>
+            <n-form-item v-if="capability('frequencyPenalty').supported">
+              <template #label><HelpLabel text="频率惩罚" :help="capability('frequencyPenalty').description"/></template>
+              <n-input-number v-model:value="editingConfig.frequencyPenalty" clearable :min="-2" :max="2" :step="0.1" style="width: 100%"/>
+            </n-form-item>
+            <n-form-item v-if="capability('seed').supported">
+              <template #label><HelpLabel text="随机种子" :help="capability('seed').description"/></template>
+              <n-input-number v-model:value="editingConfig.seed" clearable :step="1" style="width: 100%"/>
+            </n-form-item>
+            <n-form-item v-if="capability('stopSequences').supported">
+              <template #label><HelpLabel text="停止序列" :help="capability('stopSequences').description"/></template>
+              <n-input v-model:value="stopSequencesText" type="textarea" :rows="3" placeholder="每行一个停止序列"/>
+            </n-form-item>
+            <n-form-item v-if="capability('responseFormat').supported">
+              <template #label><HelpLabel text="输出格式" :help="capability('responseFormat').description"/></template>
+              <n-select v-model:value="editingConfig.responseFormat" :options="capability('responseFormat').options"/>
+            </n-form-item>
+
+            <n-divider v-if="capability('reasoningMode').supported" title-placement="left">推理参数</n-divider>
+            <n-form-item v-if="capability('reasoningMode').supported">
+              <template #label><HelpLabel text="推理模式" :help="capability('reasoningMode').description"/></template>
+              <n-select v-model:value="editingConfig.reasoningMode" :options="capability('reasoningMode').options"/>
+            </n-form-item>
+            <n-form-item v-if="capability('reasoningEffort').supported && editingConfig.reasoningMode !== 'off'">
+              <template #label><HelpLabel text="推理强度" :help="capability('reasoningEffort').description"/></template>
+              <n-select v-model:value="editingConfig.reasoningEffort" clearable :options="capability('reasoningEffort').options" placeholder="使用供应商默认强度"/>
+            </n-form-item>
+            <n-form-item v-if="capability('reasoningBudget').supported && editingConfig.reasoningMode !== 'off'">
+              <template #label><HelpLabel text="推理预算" :help="capability('reasoningBudget').description"/></template>
+              <n-input-number v-model:value="editingConfig.reasoningBudget" clearable :min="capability('reasoningBudget').min" :max="capability('reasoningBudget').max" :step="1" style="width: 100%"/>
+            </n-form-item>
+            <n-alert v-if="capabilities?.profile === 'gemini' && editingConfig.reasoningEffort && editingConfig.reasoningBudget" type="warning">Gemini 推理强度与推理预算不能同时设置，请清除其中一项。</n-alert>
+
+            <n-divider title-placement="left">网络设置</n-divider>
+            <n-form-item>
+              <template #label><HelpLabel text="Timeout（秒）" help="单次模型请求的最大等待时间。推理强度较高时通常需要更长超时。"/></template>
+              <n-input-number v-model:value="editingConfig.timeOut" :min="1" :step="1" style="width: 100%"/>
+            </n-form-item>
+            <n-form-item>
+              <template #label><HelpLabel text="HTTP 代理" help="仅该 AI 配置使用的 HTTP(S) 代理。启用后必须填写有效代理地址。"/></template>
+              <n-switch v-model:value="editingConfig.httpProxyEnabled"/>
+            </n-form-item>
+            <n-form-item v-if="editingConfig.httpProxyEnabled" label="代理地址"><n-input v-model:value="editingConfig.httpProxy" placeholder="http://127.0.0.1:7890"/></n-form-item>
+
+            <n-alert v-if="incompatibleFields.length" type="warning" style="margin-top: 12px">
+              已保存参数中有当前模型不支持的项目：{{ incompatibleFields.map(item => item.label).join('、') }}。这些值不会被静默删除，也不会发送给模型；请确认后手动清除。
+              <template #action><n-button size="small" type="warning" @click="clearIncompatibleFields">清除不兼容参数</n-button></template>
+            </n-alert>
+            <n-alert v-for="warning in capabilities?.warnings || []" :key="warning" type="default" :show-icon="false" style="margin-top: 8px">{{ warning }}</n-alert>
+          </n-form>
+        </n-spin>
         <template #footer>
           <n-space>
-            <n-button @click="drawerVisible = false">取消</n-button>
-            <n-button type="primary" @click="applyDrawerConfig">确定</n-button>
+            <n-button :disabled="submitting" @click="drawerVisible = false">取消</n-button>
+            <n-button type="primary" :loading="submitting" @click="saveConfig">保存</n-button>
           </n-space>
         </template>
       </n-drawer-content>
@@ -498,4 +557,5 @@ onMounted(() => {
 </template>
 
 <style scoped>
+:deep(.n-form-item-label) { align-items: center; }
 </style>

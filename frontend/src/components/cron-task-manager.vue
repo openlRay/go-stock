@@ -86,26 +86,26 @@
           />
         </n-form-item>
 
-        <n-form-item label="Cron 表达式" path="cronExpr">
+        <n-form-item label="执行时间" path="cronExpr">
           <n-space :vertical="true" :size="8" style="width: 100%">
             <n-input
               v-model:value="formData.cronExpr"
-              placeholder="通过下方选择器生成或直接输入"
-              clearable
+              placeholder="请设置任务执行时间"
+              readonly
             >
               <template #suffix>
                 <n-button size="small" @click="showCronBuilder = true">
                   <template #icon>
                     <n-icon :component="SettingsOutline" />
                   </template>
-                  配置
+                  设置
                 </n-button>
               </template>
             </n-input>
             <n-space :vertical="true" :size="4" style="width: 100%">
               <n-text depth="3" style="font-size: 12px">
                 <n-icon :component="InformationCircleOutline" size="14" />
-                点击"配置"按钮打开可视化配置器 | 当前值：{{ formData.cronExpr || '未设置' }}
+                支持手动设置、AI 辅助填充和专家 Cron | 当前值：{{ formData.cronExpr || '未设置' }}
               </n-text>
               <n-text v-if="calculateNextRunTime" depth="2" style="font-size: 12px; color: #18a058">
                 <n-icon :component="TimeOutline" size="14" />
@@ -341,157 +341,17 @@
       </template>
     </n-modal>
 
-    <!-- Cron 表达式配置器 -->
-    <n-modal
+    <CronScheduleEditor
       v-model:show="showCronBuilder"
-      title="Cron 表达式配置器"
-      preset="dialog"
-      :style="{ width: '850px' }"
-      :z-index="11000"
-      to="body"
-    >
-      <n-card size="small">
-        <n-space :vertical="true" :size="12">
-          <!-- 秒 -->
-          <div class="cron-row">
-            <span class="cron-label">秒:</span>
-            <n-radio-group v-model:value="cronSecond.type" name="secondType">
-              <n-space :size="8">
-                <n-radio :value="'*'">每秒</n-radio>
-                <n-radio :value="'interval'">周期</n-radio>
-                <n-input-number v-model:value="cronSecond.start" :min="0" :max="59" :disabled="cronSecond.type !== 'interval'" style="width: 80px" />-
-                <n-input-number v-model:value="cronSecond.end" :min="0" :max="59" :disabled="cronSecond.type !== 'interval'" style="width: 80px" />
-                <n-radio :value="'loop'">循环</n-radio>
-                <n-input-number v-model:value="cronSecond.loopStart" :min="0" :max="59" :disabled="cronSecond.type !== 'loop'" style="width: 80px" />/
-                <n-input-number v-model:value="cronSecond.loopStep" :min="1" :max="59" :disabled="cronSecond.type !== 'loop'" style="width: 80px" />
-                <n-radio :value="'appoint'">指定</n-radio>
-                <n-select v-model:value="cronSecond.appoint" multiple :options="secondOptions" :disabled="cronSecond.type !== 'appoint'" style="width: 400px" placeholder="选择具体的秒" />
-              </n-space>
-            </n-radio-group>
-          </div>
-
-          <!-- 分 -->
-          <div class="cron-row">
-            <span class="cron-label">分:</span>
-            <n-radio-group v-model:value="cronMinute.type" name="minuteType">
-              <n-space :size="8">
-                <n-radio :value="'*'">每分</n-radio>
-                <n-radio :value="'interval'">周期</n-radio>
-                <n-input-number v-model:value="cronMinute.start" :min="0" :max="59" :disabled="cronMinute.type !== 'interval'" style="width: 80px" />-
-                <n-input-number v-model:value="cronMinute.end" :min="0" :max="59" :disabled="cronMinute.type !== 'interval'" style="width: 80px" />
-                <n-radio :value="'loop'">循环</n-radio>
-                <n-input-number v-model:value="cronMinute.loopStart" :min="0" :max="59" :disabled="cronMinute.type !== 'loop'" style="width: 80px" />/
-                <n-input-number v-model:value="cronMinute.loopStep" :min="1" :max="59" :disabled="cronMinute.type !== 'loop'" style="width: 80px" />
-                <n-radio :value="'appoint'">指定</n-radio>
-                <n-select v-model:value="cronMinute.appoint" multiple :options="minuteOptions" :disabled="cronMinute.type !== 'appoint'" style="width: 400px" placeholder="选择具体的分" />
-              </n-space>
-            </n-radio-group>
-          </div>
-
-          <!-- 时 -->
-          <div class="cron-row">
-            <span class="cron-label">时:</span>
-            <n-radio-group v-model:value="cronHour.type" name="hourType">
-              <n-space :size="8">
-                <n-radio :value="'*'">每小时</n-radio>
-                <n-radio :value="'interval'">周期</n-radio>
-                <n-input-number v-model:value="cronHour.start" :min="0" :max="23" :disabled="cronHour.type !== 'interval'" style="width: 80px" />-
-                <n-input-number v-model:value="cronHour.end" :min="0" :max="23" :disabled="cronHour.type !== 'interval'" style="width: 80px" />
-                <n-radio :value="'loop'">循环</n-radio>
-                <n-input-number v-model:value="cronHour.loopStart" :min="0" :max="23" :disabled="cronHour.type !== 'loop'" style="width: 80px" />/
-                <n-input-number v-model:value="cronHour.loopStep" :min="1" :max="23" :disabled="cronHour.type !== 'loop'" style="width: 80px" />
-                <n-radio :value="'appoint'">指定</n-radio>
-                <n-select v-model:value="cronHour.appoint" multiple :options="hourOptions" :disabled="cronHour.type !== 'appoint'" style="width: 400px" placeholder="选择具体的时" />
-              </n-space>
-            </n-radio-group>
-          </div>
-
-          <!-- 日 -->
-          <div class="cron-row">
-            <span class="cron-label">日:</span>
-            <n-radio-group v-model:value="cronDay.type" name="dayType">
-              <n-space :size="8">
-                <n-radio :value="'*'">每日</n-radio>
-                <n-radio :value="'interval'">周期</n-radio>
-                <n-input-number v-model:value="cronDay.start" :min="1" :max="31" :disabled="cronDay.type !== 'interval'" style="width: 80px" />-
-                <n-input-number v-model:value="cronDay.end" :min="1" :max="31" :disabled="cronDay.type !== 'interval'" style="width: 80px" />
-                <n-radio :value="'?'">不指定</n-radio>
-              </n-space>
-            </n-radio-group>
-          </div>
-
-          <!-- 月 -->
-          <div class="cron-row">
-            <span class="cron-label">月:</span>
-            <n-radio-group v-model:value="cronMonth.type" name="monthType">
-              <n-space :size="8">
-                <n-radio :value="'*'">每月</n-radio>
-                <n-radio :value="'interval'">周期</n-radio>
-                <n-input-number v-model:value="cronMonth.start" :min="1" :max="12" :disabled="cronMonth.type !== 'interval'" style="width: 80px" />-
-                <n-input-number v-model:value="cronMonth.end" :min="1" :max="12" :disabled="cronMonth.type !== 'interval'" style="width: 80px" />
-              </n-space>
-            </n-radio-group>
-          </div>
-
-          <!-- 周 -->
-          <div class="cron-row">
-            <span class="cron-label">周:</span>
-            <n-radio-group v-model:value="cronWeek.type" name="weekType">
-              <n-space :size="8">
-                <n-radio :value="'*'">每周</n-radio>
-                <n-radio :value="'interval'">周期</n-radio>
-                <n-select v-model:value="cronWeek.days" multiple :options="weekOptions" :disabled="cronWeek.type !== 'interval'" style="width: 250px" />
-                <n-radio :value="'?'">不指定</n-radio>
-              </n-space>
-            </n-radio-group>
-          </div>
-        </n-space>
-      </n-card>
-
-      <!-- 预览结果 -->
-      <n-alert type="info" title="生成的 Cron 表达式" style="margin-top: 12px;">
-        <n-space :vertical="true" :size="8">
-          <n-space align="center">
-            <n-text strong style="font-size: 14px; font-family: monospace;">{{ generatedCronExpr }}</n-text>
-            <n-button size="small" @click="copyCronExpr">
-              <template #icon>
-                <n-icon :component="CreateOutline" />
-              </template>
-              复制
-            </n-button>
-          </n-space>
-          <n-space :vertical="true" :size="4">
-            <n-text strong style="font-size: 14px;">未来 5 次执行时间：</n-text>
-            <n-text v-if="!nextRunTimes.length" depth="3" style="font-size: 12px;">
-              暂无可用时间，请检查 Cron 表达式是否有效。
-            </n-text>
-            <n-text
-              v-for="(time, index) in nextRunTimes"
-              :key="index"
-              strong
-              style="font-size: 13px; font-family: monospace;"
-            >
-              {{ index + 1 }}. {{ time }}
-            </n-text>
-          </n-space>
-        </n-space>
-      </n-alert>
-
-      <template #action>
-        <n-button @click="showCronBuilder = false">取消</n-button>
-        <n-button type="primary" @click="saveCronExpr">
-          <template #icon>
-            <n-icon :component="CheckmarkCircleOutline" />
-          </template>
-          确定
-        </n-button>
-      </template>
-    </n-modal>
+      :cron-expr="formData.cronExpr"
+      :ai-config-options="aiConfigOptions"
+      @confirm="handleCronScheduleConfirm"
+    />
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, computed, h, watch } from 'vue'
-import { NButton, NIcon, NTag, NSpace, NPopconfirm, useMessage, NText, NCard, NRadioGroup, NRadio, NInputNumber, NSelect, NAlert, NCode, NSwitch } from 'naive-ui'
+import { ref, reactive, onMounted, onBeforeUnmount, computed, h, watch } from 'vue'
+import { NButton, NIcon, NTag, NSpace, NPopconfirm, useMessage, NText, NCard, NSelect, NSwitch } from 'naive-ui'
 import {
   SearchOutline,
   AddOutline,
@@ -519,10 +379,11 @@ import {
   ValidateCronExpr,
   SearchCronTasks,
   GetAiConfigs,
-  CalculateNextRunTime,
   CalculateNextRunTimes,
   GetPromptTemplates
 } from '../../wailsjs/go/main/App'
+import {EventsOn} from '../../wailsjs/runtime'
+import CronScheduleEditor from './cron-schedule-editor.vue'
 
 const message = useMessage()
 
@@ -597,203 +458,19 @@ const generatedParamsJson = computed(() => {
 
 })
 
-// 生成 Cron 表达式
-const generateCronExpression = () => {
-  // 解析秒
-  let second = '*'
-  if (cronSecond.type === 'interval') {
-    second = `${cronSecond.start}-${cronSecond.end}`
-  } else if (cronSecond.type === 'loop') {
-    second = `${cronSecond.loopStart}/${cronSecond.loopStep}`
-  } else if (cronSecond.type === 'appoint' && cronSecond.appoint.length > 0) {
-    second = cronSecond.appoint.join(',')
-  }
-  
-  // 解析分
-  let minute = '*'
-  if (cronMinute.type === 'interval') {
-    minute = `${cronMinute.start}-${cronMinute.end}`
-  } else if (cronMinute.type === 'loop') {
-    minute = `${cronMinute.loopStart}/${cronMinute.loopStep}`
-  } else if (cronMinute.type === 'appoint' && cronMinute.appoint.length > 0) {
-    minute = cronMinute.appoint.join(',')
-  }
-  
-  // 解析时
-  let hour = '*'
-  if (cronHour.type === 'interval') {
-    hour = `${cronHour.start}-${cronHour.end}`
-  } else if (cronHour.type === 'loop') {
-    hour = `${cronHour.loopStart}/${cronHour.loopStep}`
-  } else if (cronHour.type === 'appoint' && cronHour.appoint.length > 0) {
-    hour = cronHour.appoint.join(',')
-  }
-  
-  // 解析日
-  let day = '*'
-  if (cronDay.type === 'interval') {
-    day = `${cronDay.start}-${cronDay.end}`
-  } else if (cronDay.type === '?') {
-    day = '?'
-  }
-  
-  // 解析月
-  let month = '*'
-  if (cronMonth.type === 'interval') {
-    month = `${cronMonth.start}-${cronMonth.end}`
-  }
-  
-  // 解析周
-  let week = '*'
-  if (cronWeek.type === 'interval' && cronWeek.days.length > 0) {
-    week = cronWeek.days.join(',')
-  } else if (cronWeek.type === '?') {
-    week = '?'
-  }
-  
-  return `${second} ${minute} ${hour} ${day} ${month} ${week}`
-}
-
-// 保存 Cron 表达式
-const saveCronExpr = () => {
-  formData.cronExpr = generatedCronExpr.value
-  showCronBuilder.value = false
-  message.success('Cron 表达式已保存')
-}
-
-// 解析 Cron 表达式并回填到配置器（支持 6 段：秒 分 时 日 月 周；兼容 5 段时自动补秒为 0）
-const parseCronExpression = (cronExpr) => {
-  if (!cronExpr || typeof cronExpr !== 'string') return
-  const raw = cronExpr.trim().replace(/\s+/g, ' ').split(' ')
-  if (raw.length < 5) return
-  // 5 段视为 分 时 日 月 周，前面补秒 0
-  const parts = raw.length === 5 ? ['0', ...raw] : raw.slice(0, 6)
-  const [second, minute, hour, day, month, week] = parts
-
-  const applySecond = (val) => {
-    if (val === '*') {
-      cronSecond.type = '*'
-    } else if (val.includes('-')) {
-      const [start, end] = val.split('-').map(Number)
-      cronSecond.type = 'interval'
-      cronSecond.start = start
-      cronSecond.end = end
-    } else if (val.includes('/')) {
-      const [start, step] = val.split('/').map(Number)
-      cronSecond.type = 'loop'
-      cronSecond.loopStart = start
-      cronSecond.loopStep = step
-    } else if (val.includes(',')) {
-      cronSecond.type = 'appoint'
-      cronSecond.appoint = val.split(',').map(s => String(s).trim()).filter(Boolean)
-    } else {
-      cronSecond.type = 'appoint'
-      cronSecond.appoint = [String(val)]
-    }
-  }
-  const applyMinute = (val) => {
-    if (val === '*') cronMinute.type = '*'
-    else if (val.includes('-')) {
-      const [start, end] = val.split('-').map(Number)
-      cronMinute.type = 'interval'
-      cronMinute.start = start
-      cronMinute.end = end
-    } else if (val.includes('/')) {
-      const [start, step] = val.split('/').map(Number)
-      cronMinute.type = 'loop'
-      cronMinute.loopStart = start
-      cronMinute.loopStep = step
-    } else if (val.includes(',')) {
-      cronMinute.type = 'appoint'
-      cronMinute.appoint = val.split(',').map(s => String(s).trim()).filter(Boolean)
-    } else {
-      cronMinute.type = 'appoint'
-      cronMinute.appoint = [String(val)]
-    }
-  }
-  const applyHour = (val) => {
-    if (val === '*') cronHour.type = '*'
-    else if (val.includes('-')) {
-      const [start, end] = val.split('-').map(Number)
-      cronHour.type = 'interval'
-      cronHour.start = start
-      cronHour.end = end
-    } else if (val.includes('/')) {
-      const [start, step] = val.split('/').map(Number)
-      cronHour.type = 'loop'
-      cronHour.loopStart = start
-      cronHour.loopStep = step
-    } else if (val.includes(',')) {
-      cronHour.type = 'appoint'
-      cronHour.appoint = val.split(',').map(s => String(s).trim()).filter(Boolean)
-    } else {
-      cronHour.type = 'appoint'
-      cronHour.appoint = [String(val)]
-    }
-  }
-
-  applySecond(second)
-  applyMinute(minute)
-  applyHour(hour)
-
-  if (day === '*') cronDay.type = '*'
-  else if (day === '?') cronDay.type = '?'
-  else if (day.includes('-')) {
-    const [start, end] = day.split('-').map(Number)
-    cronDay.type = 'interval'
-    cronDay.start = start
-    cronDay.end = end
-  } else {
-    cronDay.type = 'interval'
-    const n = Number(day)
-    if (!Number.isNaN(n)) {
-      cronDay.start = n
-      cronDay.end = n
-    }
-  }
-
-  if (month === '*') cronMonth.type = '*'
-  else if (month.includes('-')) {
-    const [start, end] = month.split('-').map(Number)
-    cronMonth.type = 'interval'
-    cronMonth.start = start
-    cronMonth.end = end
-  } else {
-    cronMonth.type = 'interval'
-    const n = Number(month)
-    if (!Number.isNaN(n)) {
-      cronMonth.start = n
-      cronMonth.end = n
-    }
-  }
-
-  if (week === '*') cronWeek.type = '*'
-  else if (week === '?') cronWeek.type = '?'
-  else if (week.includes(',')) {
-    cronWeek.type = 'interval'
-    cronWeek.days = week.split(',').map(s => String(s).trim()).filter(Boolean)
-  } else {
-    cronWeek.type = 'interval'
-    const n = String(week).trim()
-    if (n) cronWeek.days = [n]
-  }
-}
-
-// 复制 Cron 表达式
-const copyCronExpr = async () => {
-  try {
-    await navigator.clipboard.writeText(generatedCronExpr.value)
-    message.success('已复制到剪贴板')
-  } catch (err) {
-    message.error('复制失败')
-  }
-}
-
 // 股票分析参数
 const showCronBuilder = ref(false)
-const generatedCronExpr = ref('')
 const calculateNextRunTime = ref('')
-const nextRunTimes = ref([])
+
+const handleCronScheduleConfirm = async (cronExpr) => {
+  formData.cronExpr = cronExpr
+  try {
+    const times = await CalculateNextRunTimes(cronExpr, 1)
+    calculateNextRunTime.value = Array.isArray(times) ? (times[0] || '') : ''
+  } catch (_) {
+    calculateNextRunTime.value = ''
+  }
+}
 
 //任务参数
 const agentModeOptions = [
@@ -819,80 +496,6 @@ const marketAnalysisParamsData= reactive({
   thinking: true,
   agentMode: ''
 })
-
-
-// Cron 配置器数据
-const cronSecond = reactive({ type: '*', start: 0, end: 0, loopStart: 0, loopStep: 1, appoint: [] })
-const cronMinute = reactive({ type: '*', start: 0, end: 0, loopStart: 0, loopStep: 1, appoint: [] })
-const cronHour = reactive({ type: '*', start: 0, end: 0, loopStart: 0, loopStep: 1, appoint: [] })
-const cronDay = reactive({ type: '*', start: 1, end: 31 })
-const cronMonth = reactive({ type: '*', start: 1, end: 12 })
-const cronWeek = reactive({ type: '*', days: [] })
-
-// 生成选项数据
-const secondOptions = Array.from({ length: 60 }, (_, i) => ({ label: String(i).padStart(2, '0'), value: String(i) }))
-const minuteOptions = Array.from({ length: 60 }, (_, i) => ({ label: String(i).padStart(2, '0'), value: String(i) }))
-const hourOptions = Array.from({ length: 24 }, (_, i) => ({ label: String(i).padStart(2, '0'), value: String(i) }))
-
-const weekOptions = [
-  { label: '周日', value: '0' },
-  { label: '周一', value: '1' },
-  { label: '周二', value: '2' },
-  { label: '周三', value: '3' },
-  { label: '周四', value: '4' },
-  { label: '周五', value: '5' },
-  { label: '周六', value: '6' }
-]
-
-// 监听 Cron 配置变化，自动生成表达式并预览未来执行时间
-watch([
-  () => cronSecond.type,
-  () => cronSecond.start,
-  () => cronSecond.end,
-  () => cronSecond.loopStart,
-  () => cronSecond.loopStep,
-  () => cronSecond.appoint,
-  () => cronMinute.type,
-  () => cronMinute.start,
-  () => cronMinute.end,
-  () => cronMinute.loopStart,
-  () => cronMinute.loopStep,
-  () => cronMinute.appoint,
-  () => cronHour.type,
-  () => cronHour.start,
-  () => cronHour.end,
-  () => cronHour.loopStart,
-  () => cronHour.loopStep,
-  () => cronHour.appoint,
-  () => cronDay.type,
-  () => cronDay.start,
-  () => cronDay.end,
-  () => cronMonth.type,
-  () => cronMonth.start,
-  () => cronMonth.end,
-  () => cronWeek.type,
-  () => cronWeek.days
-], () => {
-  generatedCronExpr.value = generateCronExpression()
-
-  if (!generatedCronExpr.value) {
-    calculateNextRunTime.value = ''
-    nextRunTimes.value = []
-    return
-  }
-
-  // 预览未来最近 5 次执行时间
-  CalculateNextRunTimes(generatedCronExpr.value, 5)
-    .then(res => {
-      nextRunTimes.value = Array.isArray(res) ? res : []
-      calculateNextRunTime.value = nextRunTimes.value[0] || ''
-    })
-    .catch(() => {
-      nextRunTimes.value = []
-      calculateNextRunTime.value = ''
-    })
-}, { deep: true })
-
 // 获取任务类型显示名称
 const getTaskTypeLabel = (value) => {
   const option = taskTypeOptions.value.find(opt => opt.value === value)
@@ -1107,14 +710,18 @@ const loadTaskTypes = async () => {
 
 // 加载 AI 配置
 const aiConfigOptions=ref([])
+let stopAIConfigsChangedListener = () => {}
 const loadAiConfigs = async () => {
   try {
     const configs = await GetAiConfigs()
-    console.log('aiConfigOptions', configs)
     aiConfigOptions.value = configs.map(c => ({
       label: c.name+"["+c.modelName+"]",
       value: c.ID
     }))
+    const values = new Set(aiConfigOptions.value.map(option => Number(option.value)))
+    const fallback = aiConfigOptions.value[0]?.value ?? null
+    if (!values.has(Number(stockAnalysisParamsData.aiConfigId))) stockAnalysisParamsData.aiConfigId = fallback
+    if (!values.has(Number(marketAnalysisParamsData.aiConfigId))) marketAnalysisParamsData.aiConfigId = fallback
   } catch (error) {
     console.error('加载 AI 配置失败:', error)
   }
@@ -1240,9 +847,6 @@ const handleEdit = async (row) => {
       formData.status = task.status
       formData.description = task.description
       
-      // 解析 Cron 表达式并回填到配置器
-      parseCronExpression(formData.cronExpr)
-
       console.log("task.params",task.params)
       // 如果是股票分析任务，解析参数到表单
       if (task.taskType === 'stock_analysis' && task.params) {
@@ -1379,7 +983,7 @@ const validateCronExpression = async () => {
   
   try {
     const result = await ValidateCronExpr(formData.cronExpr)
-    if (result.includes('有效')) {
+    if (result === '有效表达式') {
       //message.success('Cron 表达式有效')
       return true
     } else {
@@ -1421,13 +1025,7 @@ const resetForm = () => {
     thinking: true,
     agentMode: ''
   })
-  // 重置 Cron 配置器
-  Object.assign(cronSecond, { type: '*', start: 0, end: 0, loopStart: 0, loopStep: 1, appoint: [] })
-  Object.assign(cronMinute, { type: '*', start: 0, end: 0, loopStart: 0, loopStep: 1, appoint: [] })
-  Object.assign(cronHour, { type: '*', start: 0, end: 0, loopStart: 0, loopStep: 1, appoint: [] })
-  Object.assign(cronDay, { type: '*', start: 1, end: 31 })
-  Object.assign(cronMonth, { type: '*', start: 1, end: 12 })
-  Object.assign(cronWeek, { type: '*', days: [] })
+  calculateNextRunTime.value = ''
   // 重置表单校验状态
   if (formRef.value) {
     formRef.value.restoreValidation()
@@ -1460,28 +1058,12 @@ watch(() => formData.taskType, (newType) => {
 
 // 初始化
 onMounted(async () => {
+  stopAIConfigsChangedListener = EventsOn('aiConfigsChanged', loadAiConfigs)
   await loadTaskTypes()
   await loadAiConfigs()
   await loadPromptTemplates()
   await loadTaskList()
 })
+
+onBeforeUnmount(() => stopAIConfigsChangedListener())
 </script>
-
-<style scoped>
-.cron-row {
-  display: flex;
-  align-items: center;
-  margin-bottom: 12px;
-}
-
-.cron-row:last-child {
-  margin-bottom: 0;
-}
-
-.cron-label {
-  width: 30px;
-  font-weight: 600;
-  color: #333;
-  flex-shrink: 0;
-}
-</style>

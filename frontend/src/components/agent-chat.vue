@@ -417,16 +417,28 @@ const handleAgentMessage = (data) => {
 
 onBeforeUnmount(() => {
   EventsOff("agent-message", handleAgentMessage)
+  stopAIConfigsChangedListener()
 })
+
+async function loadAgentAiConfigs() {
+  try {
+    const res = await GetAiConfigs()
+    const list = Array.isArray(res) ? res : []
+    const current = Number(selectValue.value)
+    selectOptions.value = list
+    selectValue.value = list.some(item => Number(item.ID) === current) ? current : (list[0]?.ID ?? null)
+  } catch (error) {
+    console.error('GetAiConfigs error:', error)
+  }
+}
+
+let stopAIConfigsChangedListener = () => {}
 
 onBeforeMount(() => {
   // 每次挂载前都重新注册事件监听
   EventsOn("agent-message", handleAgentMessage)
-  GetAiConfigs().then(res=>{
-    console.log(res)
-    selectOptions.value = res
-    selectValue.value = res[0].ID
-  })
+  stopAIConfigsChangedListener = EventsOn('aiConfigsChanged', loadAgentAiConfigs)
+  loadAgentAiConfigs()
 })
 
 onMounted(() => {

@@ -3,8 +3,6 @@ package data
 import (
 	"context"
 	"fmt"
-
-	"github.com/samber/lo"
 )
 
 // @Author spark
@@ -13,20 +11,21 @@ import (
 // -----------------------------------------------------------------------------------
 type OpenAi struct {
 	ctx              context.Context
-	BaseUrl          string  `json:"base_url"`
-	ApiKey           string  `json:"api_key"`
-	Model            string  `json:"model"`
-	MaxTokens        int     `json:"max_tokens"`
-	Temperature      float64 `json:"temperature"`
-	Prompt           string  `json:"prompt"`
-	TimeOut          int     `json:"time_out"`
-	QuestionTemplate string  `json:"question_template"`
-	CrawlTimeOut     int64   `json:"crawl_time_out"`
-	KDays            int64   `json:"kDays"`
-	BrowserPath      string  `json:"browser_path"`
-	HttpProxy        string  `json:"httpProxy"`
-	HttpProxyEnabled bool    `json:"httpProxyEnabled"`
-	ChatSource       string  `json:"-"`
+	BaseUrl          string   `json:"base_url"`
+	ApiKey           string   `json:"api_key"`
+	Model            string   `json:"model"`
+	MaxTokens        int      `json:"max_tokens"`
+	Temperature      float64  `json:"temperature"`
+	AIConfig         AIConfig `json:"-"`
+	Prompt           string   `json:"prompt"`
+	TimeOut          int      `json:"time_out"`
+	QuestionTemplate string   `json:"question_template"`
+	CrawlTimeOut     int64    `json:"crawl_time_out"`
+	KDays            int64    `json:"kDays"`
+	BrowserPath      string   `json:"browser_path"`
+	HttpProxy        string   `json:"httpProxy"`
+	HttpProxyEnabled bool     `json:"httpProxyEnabled"`
+	ChatSource       string   `json:"-"`
 }
 
 func (o *OpenAi) Ctx() context.Context     { return o.ctx }
@@ -46,9 +45,7 @@ func (o OpenAi) String() string {
 
 func NewDeepSeekOpenAi(ctx context.Context, aiConfigId int) *OpenAi {
 	settingConfig := GetSettingConfig()
-	aiConfig, find := lo.Find(settingConfig.AiConfigs, func(item *AIConfig) bool {
-		return uint(aiConfigId) == item.ID
-	})
+	aiConfig, find := settingConfig.ResolveAIConfig(aiConfigId)
 	if !find {
 		aiConfig = &AIConfig{}
 	}
@@ -71,6 +68,7 @@ func NewDeepSeekOpenAi(ctx context.Context, aiConfigId int) *OpenAi {
 		Model:            aiConfig.ModelName,
 		MaxTokens:        aiConfig.MaxTokens,
 		Temperature:      aiConfig.Temperature,
+		AIConfig:         *aiConfig,
 		TimeOut:          aiConfig.TimeOut,
 		HttpProxy:        aiConfig.HttpProxy,
 		HttpProxyEnabled: aiConfig.HttpProxyEnabled,

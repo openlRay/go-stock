@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/cloudwego/eino-ext/components/model/ark"
 	"github.com/cloudwego/eino-ext/components/model/claude"
 	"github.com/cloudwego/eino-ext/components/model/deepseek"
@@ -19,22 +20,9 @@ import (
 	"github.com/cloudwego/eino-ext/components/model/openrouter"
 	"github.com/cloudwego/eino-ext/components/model/qwen"
 	"github.com/cloudwego/eino/components/model"
-	"github.com/duke-git/lancet/v2/strutil"
 	ollamaapi "github.com/eino-contrib/ollama/api"
+	arkmodel "github.com/volcengine/volcengine-go-sdk/service/arkruntime/model"
 	"google.golang.org/genai"
-)
-
-type chatModelProvider int
-
-const (
-	providerOpenAICompatible chatModelProvider = iota
-	providerVolcArk
-	providerDashScope
-	providerOpenRouter
-	providerAnthropic
-	providerOllama
-	providerGemini
-	providerDeepSeek
 )
 
 func normalizeBaseURL(base string) string {
@@ -44,47 +32,6 @@ func normalizeBaseURL(base string) string {
 func normalizeChatModelBaseURL(base string) string {
 	base = normalizeBaseURL(base)
 	return strings.TrimSuffix(base, "/chat/completions")
-}
-
-func detectChatModelProvider(baseLower, modelName string) chatModelProvider {
-	modelLower := strings.ToLower(strings.TrimSpace(modelName))
-
-	if strings.Contains(baseLower, "volces.com") && strings.Contains(baseLower, "ark") {
-		return providerVolcArk
-	}
-	if strings.Contains(baseLower, "dashscope.aliyuncs.com") ||
-		strings.Contains(baseLower, "dashscope-intl.aliyuncs.com") {
-		return providerDashScope
-	}
-	if strings.Contains(baseLower, "openrouter.ai") {
-		return providerOpenRouter
-	}
-	if strings.Contains(baseLower, "anthropic.com") || strings.Contains(baseLower, "api.anthropic") {
-		return providerAnthropic
-	}
-	if strings.Contains(baseLower, ":11434") || strings.Contains(baseLower, "ollama") {
-		return providerOllama
-	}
-	if isGeminiGoogleAI(baseLower, modelLower) {
-		return providerGemini
-	}
-	if strings.Contains(baseLower, "api.deepseek.com") ||
-		strutil.ContainsAny(modelLower, []string{"deepseek", "deepseek-v", "deepseek-r", "deepseek-chat", "deepseek-coder", "deepseek-reasoner"}) {
-		return providerDeepSeek
-	}
-	return providerOpenAICompatible
-}
-
-func isGeminiGoogleAI(baseLower, modelLower string) bool {
-	if strings.Contains(baseLower, "generativelanguage.googleapis.com") ||
-		strings.Contains(baseLower, "ai.google.dev") {
-		return true
-	}
-	if strings.HasPrefix(modelLower, "gemini-") || strings.HasPrefix(modelLower, "gemini/") ||
-		strings.HasPrefix(modelLower, "models/gemini") {
-		return baseLower == "" || strings.Contains(baseLower, "googleapis.com")
-	}
-	return false
 }
 
 func parseAccessSecret(apiKey string) (ak, sk string) {
@@ -108,44 +55,82 @@ func parseAccessSecret(apiKey string) (ak, sk string) {
 	return s, ""
 }
 
-func ptrFloat32(v float32) *float32 { return &v }
-func ptrBool(v bool) *bool          { return &v }
+func ptrBool(v bool) *bool { return &v }
 
 // createChatModel 按 Eino 生态组件路由（参见 https://www.cloudwego.io/zh/docs/eino/ecosystem_integration/chat_model/ ）
 // 未命中专用实现时回退到 OpenAI 兼容 ChatModel（硅基流动、LM Studio、Azure OpenAI 等）。
 func createChatModel(ctx context.Context, aiConfig data.AIConfig) (model.ToolCallingChatModel, error) {
 	baseURL := normalizeChatModelBaseURL(aiConfig.BaseUrl)
-	baseLower := strings.ToLower(baseURL)
-	temperature := float32(aiConfig.Temperature)
+	effective, _, err := data.ResolveEffectiveAIParameters(aiConfig, data.EffectiveReasoningEnabled(&aiConfig))
+	if err != nil {
+		return nil, err
+	}
+	var temperature *float32
+	if effective.Temperature != nil {
+		value := float32(*effective.Temperature)
+		temperature = &value
+	}
+	var topP *float32
+	if effective.TopP != nil {
+		value := float32(*effective.TopP)
+		topP = &value
+	}
+	var presencePenalty *float32
+	if effective.PresencePenalty != nil {
+		value := float32(*effective.PresencePenalty)
+		presencePenalty = &value
+	}
+	var frequencyPenalty *float32
+	if effective.FrequencyPenalty != nil {
+		value := float32(*effective.FrequencyPenalty)
+		frequencyPenalty = &value
+	}
 	timeout := time.Duration(aiConfig.TimeOut) * time.Second
 	if timeout <= 0 {
 		timeout = 300 * time.Second
 	}
-	maxTok := aiConfig.MaxTokens
+	maxTok := effective.MaxTokens
 	if maxTok <= 0 {
 		maxTok = 4096
 	}
 
-	p := detectChatModelProvider(baseLower, aiConfig.ModelName)
-	logger.SugaredLogger.Infof("createChatModel provider=%d base=%q model=%q", p, aiConfig.BaseUrl, aiConfig.ModelName)
+	p := effective.Provider
+	logger.SugaredLogger.Infof("createChatModel provider=%s base=%q model=%q", p, aiConfig.BaseUrl, aiConfig.ModelName)
 
 	switch p {
-	case providerVolcArk:
+	case data.AIProviderVolcArk:
 		var thinking *ark.Thinking
-		if aiConfig.Thinking {
-			thinking = &ark.Thinking{Type: "enabled"}
+		if effective.ReasoningMode != data.ReasoningModeOff {
+			thinkingType := arkmodel.ThinkingTypeAuto
+			if effective.ReasoningMode == data.ReasoningModeOn {
+				thinkingType = arkmodel.ThinkingTypeEnabled
+			}
+			thinking = &ark.Thinking{Type: thinkingType}
 		}
-		return ark.NewChatModel(ctx, &ark.ChatModelConfig{
-			BaseURL:     baseURL,
-			Model:       aiConfig.ModelName,
-			APIKey:      aiConfig.ApiKey,
-			MaxTokens:   &maxTok,
-			Temperature: &temperature,
-			Thinking:    thinking,
-			Timeout:     &timeout,
-		})
+		cfg := &ark.ChatModelConfig{
+			BaseURL:          baseURL,
+			Model:            aiConfig.ModelName,
+			APIKey:           aiConfig.ApiKey,
+			MaxTokens:        &maxTok,
+			Temperature:      temperature,
+			TopP:             topP,
+			Stop:             effective.StopSequences,
+			PresencePenalty:  presencePenalty,
+			FrequencyPenalty: frequencyPenalty,
+			Thinking:         thinking,
+			Timeout:          &timeout,
+		}
+		if effective.MaxCompletionTokens != nil {
+			cfg.MaxTokens = nil
+			cfg.MaxCompletionTokens = effective.MaxCompletionTokens
+		}
+		if effective.ReasoningEffort != "" {
+			effort := arkmodel.ReasoningEffort(effective.ReasoningEffort)
+			cfg.ReasoningEffort = &effort
+		}
+		return ark.NewChatModel(ctx, cfg)
 
-	case providerDashScope:
+	case data.AIProviderDashScope:
 		cfg := &qwen.ChatModelConfig{
 			APIKey:    aiConfig.ApiKey,
 			BaseURL:   baseURL,
@@ -153,32 +138,58 @@ func createChatModel(ctx context.Context, aiConfig data.AIConfig) (model.ToolCal
 			Timeout:   timeout,
 			MaxTokens: &maxTok,
 		}
-		if aiConfig.Temperature > 0 {
-			cfg.Temperature = ptrFloat32(temperature)
+		cfg.Temperature = temperature
+		cfg.TopP = topP
+		cfg.Stop = effective.StopSequences
+		cfg.PresencePenalty = presencePenalty
+		cfg.FrequencyPenalty = frequencyPenalty
+		if effective.Seed != nil {
+			seed := int(*effective.Seed)
+			cfg.Seed = &seed
 		}
-		if aiConfig.Thinking {
+		if effective.ResponseFormat == "json_object" {
+			cfg.ResponseFormat = &einoopenai.ChatCompletionResponseFormat{Type: einoopenai.ChatCompletionResponseFormatTypeJSONObject}
+		}
+		if effective.ReasoningMode != data.ReasoningModeOff {
 			cfg.EnableThinking = ptrBool(true)
 		}
 		return qwen.NewChatModel(ctx, cfg)
 
-	case providerOpenRouter:
+	case data.AIProviderOpenRouter:
 		cfg := &openrouter.Config{
-			APIKey:    aiConfig.ApiKey,
-			BaseURL:   baseURL,
-			Model:     aiConfig.ModelName,
-			Timeout:   timeout,
-			MaxTokens: &maxTok,
+			APIKey:              aiConfig.ApiKey,
+			BaseURL:             baseURL,
+			Model:               aiConfig.ModelName,
+			Timeout:             timeout,
+			MaxTokens:           &maxTok,
+			MaxCompletionTokens: effective.MaxCompletionTokens,
+			Temperature:         temperature,
+			TopP:                topP,
+			Stop:                effective.StopSequences,
+			PresencePenalty:     presencePenalty,
+			FrequencyPenalty:    frequencyPenalty,
 		}
-		if aiConfig.Temperature > 0 {
-			cfg.Temperature = ptrFloat32(temperature)
+		if effective.MaxCompletionTokens != nil {
+			cfg.MaxTokens = nil
 		}
-		if aiConfig.Thinking {
-			enabled := true
-			cfg.Reasoning = &openrouter.Reasoning{Enabled: &enabled}
+		if effective.Seed != nil {
+			seed := int(*effective.Seed)
+			cfg.Seed = &seed
+		}
+		if effective.ResponseFormat == "json_object" {
+			cfg.ResponseFormat = &openrouter.ChatCompletionResponseFormat{Type: openrouter.ChatCompletionResponseFormatTypeJSONObject}
+		}
+		if effective.ReasoningMode != data.ReasoningModeOff {
+			enabled := effective.ReasoningMode == data.ReasoningModeOn
+			reasoning := &openrouter.Reasoning{Enabled: &enabled, Effort: openrouter.Effort(effective.ReasoningEffort)}
+			if effective.ReasoningBudget != nil {
+				reasoning.MaxTokens = *effective.ReasoningBudget
+			}
+			cfg.Reasoning = reasoning
 		}
 		return openrouter.NewChatModel(ctx, cfg)
 
-	case providerAnthropic:
+	case data.AIProviderAnthropic:
 		maxOut := aiConfig.MaxTokens
 		if maxOut <= 0 {
 			maxOut = 8192
@@ -191,25 +202,41 @@ func createChatModel(ctx context.Context, aiConfig data.AIConfig) (model.ToolCal
 				Timeout: timeout,
 			},
 		}
-		if aiConfig.Temperature > 0 {
-			cfg.Temperature = ptrFloat32(temperature)
+		cfg.Temperature = temperature
+		cfg.TopP = topP
+		if effective.TopK != nil {
+			value := int32(*effective.TopK)
+			cfg.TopK = &value
 		}
+		cfg.StopSequences = effective.StopSequences
 		if b := baseURL; b != "" {
 			cfg.BaseURL = &b
 		}
-		if aiConfig.Thinking {
-			cfg.Thinking = &claude.Thinking{Enable: true, BudgetTokens: min(maxOut, 32000)}
+		if effective.ReasoningMode == data.ReasoningModeOn && effective.ReasoningBudget != nil {
+			cfg.Thinking = &claude.Thinking{Enable: true, BudgetTokens: *effective.ReasoningBudget}
+		} else if effective.ReasoningMode == data.ReasoningModeAuto {
+			cfg.ThinkingConfig = &anthropic.ThinkingConfigParamUnion{OfAdaptive: &anthropic.ThinkingConfigAdaptiveParam{}}
 		}
 		return claude.NewChatModel(ctx, cfg)
 
-	case providerOllama:
+	case data.AIProviderOllama:
 		base := strings.TrimSpace(aiConfig.BaseUrl)
 		if base == "" {
 			base = "http://127.0.0.1:11434"
 		}
 		opt := &ollamaapi.Options{}
-		if aiConfig.Temperature > 0 {
-			opt.Temperature = temperature
+		if temperature != nil {
+			opt.Temperature = *temperature
+		}
+		if topP != nil {
+			opt.TopP = *topP
+		}
+		if effective.TopK != nil {
+			opt.TopK = *effective.TopK
+		}
+		opt.Stop = effective.StopSequences
+		if effective.Seed != nil {
+			opt.Seed = int(*effective.Seed)
 		}
 		cfg := &ollama.ChatModelConfig{
 			BaseURL: base,
@@ -217,13 +244,13 @@ func createChatModel(ctx context.Context, aiConfig data.AIConfig) (model.ToolCal
 			Timeout: timeout,
 			Options: opt,
 		}
-		if aiConfig.Thinking {
+		if effective.ReasoningMode != data.ReasoningModeOff {
 			tv := ollamaapi.ThinkValue{Value: true}
 			cfg.Thinking = &tv
 		}
 		return ollama.NewChatModel(ctx, cfg)
 
-	case providerGemini:
+	case data.AIProviderGemini:
 		cc := &genai.ClientConfig{APIKey: aiConfig.ApiKey}
 		if b := baseURL; b != "" {
 			cc.HTTPOptions = genai.HTTPOptions{BaseURL: b}
@@ -239,53 +266,102 @@ func createChatModel(ctx context.Context, aiConfig data.AIConfig) (model.ToolCal
 		if maxTok > 0 {
 			gcfg.MaxTokens = &maxTok
 		}
-		if aiConfig.Temperature > 0 {
-			gcfg.Temperature = ptrFloat32(temperature)
+		gcfg.Temperature = temperature
+		gcfg.TopP = topP
+		if effective.TopK != nil {
+			value := int32(*effective.TopK)
+			gcfg.TopK = &value
 		}
-		if aiConfig.Thinking {
-			gcfg.ThinkingConfig = &genai.ThinkingConfig{IncludeThoughts: true}
+		if effective.ReasoningMode != data.ReasoningModeOff {
+			thinking := &genai.ThinkingConfig{IncludeThoughts: true}
+			if effective.ReasoningBudget != nil {
+				value := int32(*effective.ReasoningBudget)
+				thinking.ThinkingBudget = &value
+			}
+			switch effective.ReasoningEffort {
+			case "minimal":
+				thinking.ThinkingLevel = genai.ThinkingLevelMinimal
+			case "low":
+				thinking.ThinkingLevel = genai.ThinkingLevelLow
+			case "medium":
+				thinking.ThinkingLevel = genai.ThinkingLevelMedium
+			case "high":
+				thinking.ThinkingLevel = genai.ThinkingLevelHigh
+			}
+			gcfg.ThinkingConfig = thinking
 		}
 		return gemini.NewChatModel(ctx, gcfg)
 
-	case providerDeepSeek:
+	case data.AIProviderDeepSeek:
 		deepseekCfg := &deepseek.ChatModelConfig{
-			BaseURL:     baseURL,
-			Model:       aiConfig.ModelName,
-			APIKey:      aiConfig.ApiKey,
-			MaxTokens:   maxTok,
-			Temperature: temperature,
-			Timeout:     timeout,
+			BaseURL:          baseURL,
+			Model:            aiConfig.ModelName,
+			APIKey:           aiConfig.ApiKey,
+			MaxTokens:        maxTok,
+			Temperature:      derefFloat32(temperature),
+			TopP:             derefFloat32(topP),
+			Stop:             effective.StopSequences,
+			PresencePenalty:  derefFloat32(presencePenalty),
+			FrequencyPenalty: derefFloat32(frequencyPenalty),
+			Timeout:          timeout,
 		}
-		if proxyClient := buildProxyHTTPClient(timeout); proxyClient != nil {
+		if effective.ResponseFormat == "json_object" {
+			deepseekCfg.ResponseFormatType = deepseek.ResponseFormatTypeJSONObject
+		}
+		if effective.ReasoningMode != data.ReasoningModeOff {
+			deepseekCfg.ThinkingConfig = &deepseek.ThinkingConfig{Type: "enabled"}
+		}
+		if proxyClient := buildProxyHTTPClient(timeout, aiConfig); proxyClient != nil {
 			deepseekCfg.HTTPClient = proxyClient
 		}
 		return deepseek.NewChatModel(ctx, deepseekCfg)
 
 	default:
 		extraFields := map[string]any{}
-		if aiConfig.Thinking {
-			logger.SugaredLogger.Warnf("generic OpenAI-compatible agent model %q ignores thinking option to keep request parameters standard", aiConfig.ModelName)
-		}
 		cfg := &einoopenai.ChatModelConfig{
-			BaseURL:     baseURL,
-			Model:       aiConfig.ModelName,
-			APIKey:      aiConfig.ApiKey,
-			Timeout:     timeout,
-			MaxTokens:   &maxTok,
-			Temperature: &temperature,
-			ExtraFields: extraFields,
+			BaseURL:             baseURL,
+			Model:               aiConfig.ModelName,
+			APIKey:              aiConfig.ApiKey,
+			Timeout:             timeout,
+			MaxTokens:           &maxTok,
+			MaxCompletionTokens: effective.MaxCompletionTokens,
+			Temperature:         temperature,
+			TopP:                topP,
+			Stop:                effective.StopSequences,
+			PresencePenalty:     presencePenalty,
+			FrequencyPenalty:    frequencyPenalty,
+			ExtraFields:         extraFields,
 		}
-		if proxyClient := buildProxyHTTPClient(timeout); proxyClient != nil {
+		if effective.MaxCompletionTokens != nil {
+			cfg.MaxTokens = nil
+		}
+		if effective.Seed != nil {
+			seed := int(*effective.Seed)
+			cfg.Seed = &seed
+		}
+		if effective.ResponseFormat == "json_object" {
+			cfg.ResponseFormat = &einoopenai.ChatCompletionResponseFormat{Type: einoopenai.ChatCompletionResponseFormatTypeJSONObject}
+		}
+		if p == data.AIProviderOpenAI && effective.ReasoningEffort != "" {
+			cfg.ReasoningEffort = einoopenai.ReasoningEffortLevel(effective.ReasoningEffort)
+		}
+		if proxyClient := buildProxyHTTPClient(timeout, aiConfig); proxyClient != nil {
 			cfg.HTTPClient = proxyClient
 		}
 		return einoopenai.NewChatModel(ctx, cfg)
 	}
 }
 
+func derefFloat32(value *float32) float32 {
+	if value == nil {
+		return 0
+	}
+	return *value
+}
+
 // buildProxyHTTPClient 构建带代理的HTTP客户端，若未配置代理则返回nil
-func buildProxyHTTPClient(timeout time.Duration) *http.Client {
-	config := data.GetSettingConfig()
-	if config == nil || !config.HttpProxyEnabled || config.HttpProxy == "" {
+func buildProxyHTTPClient(timeout time.Duration, config data.AIConfig) *http.Client {
+	if !config.HttpProxyEnabled || config.HttpProxy == "" {
 		return nil
 	}
 	proxyURL, err := url.Parse(config.HttpProxy)
