@@ -97,6 +97,9 @@ func FetchProxyCandidates() []string {
 // TestProxySpeed 下载最多 proxyTestBytes 字节测速，使用 Range 头。
 // proxy == "" 表示直连。返回 (speed_bytes_per_sec, ok)。
 func TestProxySpeed(ctx context.Context, githubURL string, proxy string) (float64, bool) {
+	if ctx == nil {
+		return 0, false
+	}
 	url := ProxyDownloadURL(githubURL, proxy)
 
 	testCtx, cancel := context.WithTimeout(ctx, proxyTestTimeout)
@@ -172,6 +175,10 @@ func TestProxySpeed(ctx context.Context, githubURL string, proxy string) (float6
 // SelectFastestProxy 并发测速直连 + 所有候选代理，返回最快的。
 // bestProxy == "" 表示直连最快（或所有代理均失败）。
 func SelectFastestProxy(ctx context.Context, githubURL string) (bestProxy string, bestSpeed float64) {
+	if ctx == nil {
+		logger.SugaredLogger.Warn("代理测速缺少请求上下文，跳过测速并使用原始下载源")
+		return "", 0
+	}
 	candidates := FetchProxyCandidates()
 	logger.SugaredLogger.Infof("开始并发测速（直连 + %d 个代理）...", len(candidates))
 
