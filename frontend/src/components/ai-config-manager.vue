@@ -31,8 +31,50 @@ const editingConfig = ref(null)
 const capabilities = ref(null)
 const capabilitiesLoading = ref(false)
 const stopSequencesText = ref('')
+const headerPairs = ref([])
 let capabilityRequestSequence = 0
 let baseUrlCapabilityTimer = null
+
+function syncHeaderPairsFromConfig() {
+  const raw = editingConfig.value?.extraHeaders
+  if (!raw) {
+    headerPairs.value = []
+    return
+  }
+  try {
+    const headers = JSON.parse(raw)
+    headerPairs.value = Object.entries(headers).map(([key, value]) => ({key, value}))
+  } catch {
+    headerPairs.value = []
+  }
+}
+
+function syncHeaderPairsToConfig() {
+  if (!editingConfig.value) return
+  const headers = {}
+  for (const pair of headerPairs.value) {
+    const key = pair.key?.trim()
+    if (key) headers[key] = pair.value || ''
+  }
+  editingConfig.value.extraHeaders = Object.keys(headers).length ? JSON.stringify(headers) : ''
+}
+
+function addHeaderPair() {
+  headerPairs.value.push({key: '', value: ''})
+}
+
+function removeHeaderPair(index) {
+  headerPairs.value.splice(index, 1)
+}
+
+function fillCodeBuddyHeaders() {
+  headerPairs.value = [
+    {key: 'x-team-id', value: ''},
+    {key: 'x-agent-id', value: ''},
+    {key: 'x-task-id', value: '{{uuid}}'},
+    {key: 'x-conversation-id', value: '{{sessionId}}'},
+  ]
+}
 
 const drawerTitle = computed(() => drawerMode.value === 'edit' ? '编辑 AI 配置' : '添加 AI 配置')
 const filteredConfigs = computed(() => {
@@ -81,7 +123,9 @@ const defaultConfig = () => new data.AIConfig({
   baseUrl: 'https://api.deepseek.com',
   apiKey: '',
   modelName: 'deepseek-reasoner',
+  modelType: 'chat',
   maxTokens: 8192,
+  contextWindow: 0,
   maxCompletionTokens: null,
   temperature: 0.1,
   temperatureConfigured: true,
@@ -100,6 +144,8 @@ const defaultConfig = () => new data.AIConfig({
   httpProxyEnabled: false,
   sessionId: '',
   thinking: true,
+  extraHeaders: '',
+  embeddingModel: '',
   isDefault: false,
 })
 
@@ -107,6 +153,7 @@ const capability = key => capabilities.value?.[key] || {supported: false, option
 const incompatibleFields = computed(() => {
   const config = editingConfig.value
   if (!config || !capabilities.value) return []
+	if (config.modelType === 'embedding') return []
   const fields = []
   const add = (key, label) => {
     if (!fields.some(field => field.key === key)) fields.push({key, label})
@@ -163,6 +210,7 @@ function openAddDrawer() {
   drawerMode.value = 'add'
   editingConfig.value = defaultConfig()
   stopSequencesText.value = ''
+  syncHeaderPairsFromConfig()
   drawerVisible.value = true
   loadCapabilities()
 }
@@ -170,7 +218,12 @@ function openAddDrawer() {
 function openEditDrawer(row) {
   drawerMode.value = 'edit'
   editingConfig.value = JSON.parse(JSON.stringify(row))
+  editingConfig.value.modelType ||= 'chat'
+  editingConfig.value.contextWindow ||= 0
+  editingConfig.value.extraHeaders ||= ''
+  editingConfig.value.embeddingModel ||= ''
   stopSequencesText.value = (editingConfig.value.stopSequences || []).join('\n')
+  syncHeaderPairsFromConfig()
   drawerVisible.value = true
   loadCapabilities()
 }
@@ -228,9 +281,10 @@ async function fetchAiModels() {
     message.warning('请先填写接口地址和 API Key')
     return
   }
+  syncHeaderPairsToConfig()
   config._loadingModels = true
   try {
-    const models = await FetchAiModels(config.baseUrl, config.apiKey)
+    const models = await FetchAiModels(config.baseUrl, config.apiKey, config.extraHeaders || '')
     config._modelOptions = (models || []).map(value => ({label: value, value}))
     if (!config._modelOptions.length) message.warning('未获取到模型，请检查地址和 API Key，或手动输入模型名称')
   } catch (error) {
@@ -243,8 +297,23 @@ async function fetchAiModels() {
 async function fetchModelInfo(modelName) {
   if (!modelName || !editingConfig.value?.baseUrl) return
   try {
-    const info = await FetchAiModelInfo(editingConfig.value.baseUrl, editingConfig.value.apiKey || '', modelName)
-    if (info?.maxTokens > 0 && !editingConfig.value.maxTokens) editingConfig.value.maxTokens = info.maxTokens
+    syncHeaderPairsToConfig()
+    const info = await FetchAiModelInfo(
+      editingConfig.value.baseUrl,
+      editingConfig.value.apiKey || '',
+      modelName,
+      editingConfig.value.extraHeaders || ''
+    )
+    const updated = []
+    if (info?.contextWindow > 0) {
+      editingConfig.value.contextWindow = info.contextWindow
+      updated.push(`上下文窗口=${info.contextWindow}`)
+    }
+    if (info?.maxTokens > 0) {
+      editingConfig.value.maxTokens = info.maxTokens
+      updated.push(`输出上限=${info.maxTokens}`)
+    }
+    if (updated.length) message.success(`已读取 ${modelName}：${updated.join('，')}`)
   } catch (error) {
     console.debug('FetchAiModelInfo failed', error)
   }
@@ -271,11 +340,13 @@ function clearIncompatibleFields() {
 }
 
 function buildSavePayload() {
+  syncHeaderPairsToConfig()
   const payload = JSON.parse(JSON.stringify(editingConfig.value))
   delete payload._loadingModels
   delete payload._modelOptions
   delete payload._key
   payload.stopSequences = stopSequencesText.value.split('\n').map(value => value.trim()).filter(Boolean)
+  payload.modelType = payload.modelType || 'chat'
   payload.thinking = payload.reasoningMode !== 'off'
   if (!payload.temperatureConfigured) payload.temperature = 0
   return payload
@@ -365,6 +436,10 @@ function confirmDelete(row) {
 }
 
 async function setDefaultConfig(row) {
+  if ((row.modelType || 'chat') === 'embedding') {
+    message.warning('向量模型不能设为默认对话模型')
+    return
+  }
   if (row.isDefault || actionLoadingId.value) return
   actionLoadingId.value = row.ID
   try {
@@ -384,14 +459,23 @@ const columns = [
     row.isDefault ? h(NTag, {type: 'success', size: 'small', bordered: false}, () => '默认') : null
   ])},
   {title: '接口平台', key: 'baseUrl', minWidth: 180, resizable: true, render: row => getPlatformName(row.baseUrl) || row.baseUrl},
+  {title: '类型', key: 'modelType', width: 90, render: row => h(NTag, {size: 'small', bordered: false}, () => (row.modelType || 'chat') === 'embedding' ? '向量' : '对话')},
   {title: '模型', key: 'modelName', minWidth: 170, resizable: true},
   {title: '推理模式', key: 'reasoningMode', width: 100, render: row => {
     const enabled = (row.reasoningMode || (row.thinking ? 'on' : 'off')) !== 'off'
     return h(NTag, {type: enabled ? 'success' : 'default', size: 'small', bordered: false}, () => enabled ? '开启' : '关闭')
   }},
   {title: '最大 Token', key: 'maxTokens', width: 110},
+  {title: '上下文窗口', key: 'contextWindow', width: 120, render: row => row.contextWindow > 0 ? row.contextWindow : '自动'},
   {title: '操作', key: 'actions', width: 290, fixed: 'right', render: row => h(NSpace, {size: 4}, () => [
-    h(NButton, {size: 'small', type: 'success', ghost: true, disabled: row.isDefault || !!actionLoadingId.value, loading: actionLoadingId.value === row.ID, onClick: () => setDefaultConfig(row)}, () => row.isDefault ? '当前默认' : '设为默认'),
+    h(NButton, {
+      size: 'small',
+      type: 'success',
+      ghost: true,
+      disabled: (row.modelType || 'chat') === 'embedding' || row.isDefault || !!actionLoadingId.value,
+      loading: actionLoadingId.value === row.ID,
+      onClick: () => setDefaultConfig(row)
+    }, () => (row.modelType || 'chat') === 'embedding' ? '仅用于向量' : (row.isDefault ? '当前默认' : '设为默认')),
     h(NButton, {size: 'small', type: 'primary', ghost: true, disabled: actionLoadingId.value === row.ID, onClick: () => openEditDrawer(row)}, () => '编辑'),
     h(NButton, {size: 'small', type: 'info', ghost: true, loading: actionLoadingId.value === row.ID, onClick: () => confirmCopy(row)}, () => '复制'),
     h(NButton, {size: 'small', type: 'error', ghost: true, loading: actionLoadingId.value === row.ID, onClick: () => confirmDelete(row)}, () => '删除')
@@ -401,7 +485,14 @@ const columns = [
 async function loadAiConfigs() {
   listLoading.value = true
   try {
-    aiConfigs.value = await GetAiConfigs() || []
+    const configs = await GetAiConfigs() || []
+    aiConfigs.value = configs.map(config => ({
+      ...config,
+      modelType: config.modelType || 'chat',
+      contextWindow: config.contextWindow || 0,
+      extraHeaders: config.extraHeaders || '',
+      embeddingModel: config.embeddingModel || '',
+    }))
   } catch (error) {
     message.error(`加载 AI 配置失败：${error}`)
   } finally {
@@ -462,14 +553,25 @@ onBeforeUnmount(() => {
               />
             </n-form-item>
             <n-form-item label="API Key" required><n-input v-model:value="editingConfig.apiKey" type="password" show-password-on="click" placeholder="API Key"/></n-form-item>
-            <n-form-item label="模型名称" required>
+            <n-form-item label="模型类型" required>
+              <n-radio-group v-model:value="editingConfig.modelType">
+                <n-radio-button value="chat">文本对话</n-radio-button>
+                <n-radio-button value="embedding">向量模型</n-radio-button>
+              </n-radio-group>
+              <n-tooltip placement="top">
+                <template #trigger><n-icon size="18" color="#2080f0" style="margin-left: 6px; cursor: help"><HelpCircleFilledIcon/></n-icon></template>
+                对话模型用于 Agent；向量模型用于知识库和长期记忆的 embeddings 接口。
+              </n-tooltip>
+            </n-form-item>
+            <n-form-item :label="editingConfig.modelType === 'embedding' ? '向量模型名称' : '模型名称'" required>
               <n-space style="width: 100%" :wrap="false">
-                <n-select v-model:value="editingConfig.modelName" :options="editingConfig._modelOptions || []" filterable tag :loading="editingConfig._loadingModels" placeholder="输入模型名，如 gpt-5.6-sol" style="flex: 1" @update:value="onModelNameChange"/>
+                <n-select v-model:value="editingConfig.modelName" :options="editingConfig._modelOptions || []" filterable tag :loading="editingConfig._loadingModels" :placeholder="editingConfig.modelType === 'embedding' ? '输入向量模型名，如 text-embedding-3-small' : '输入模型名，如 gpt-5.6-sol'" style="flex: 1" @update:value="onModelNameChange"/>
                 <n-button :loading="editingConfig._loadingModels" @click="fetchAiModels">获取模型</n-button>
               </n-space>
             </n-form-item>
             <n-alert v-if="capabilities" type="info" :show-icon="false" style="margin-bottom: 12px">当前能力档案：{{ capabilities.providerName }}</n-alert>
 
+            <template v-if="editingConfig.modelType !== 'embedding'">
             <n-divider title-placement="left">生成参数</n-divider>
             <n-form-item v-if="capability('temperature').supported">
               <template #label><HelpLabel text="Temperature" :help="capability('temperature').description"/></template>
@@ -478,6 +580,10 @@ onBeforeUnmount(() => {
             <n-form-item>
               <template #label><HelpLabel text="最大输出 Token" :help="capability('maxTokens').description"/></template>
               <n-input-number v-model:value="editingConfig.maxTokens" :min="1" :step="1" style="width: 100%"/>
+            </n-form-item>
+            <n-form-item>
+              <template #label><HelpLabel text="上下文窗口" help="模型输入与输出合计的 Token 容量。为 0 时按内置模型表或安全默认值推导。"/></template>
+              <n-input-number v-model:value="editingConfig.contextWindow" :min="0" :step="1" style="width: 100%"/>
             </n-form-item>
             <n-form-item v-if="capability('maxCompletionTokens').supported">
               <template #label><HelpLabel text="最大完成 Token" :help="capability('maxCompletionTokens').description"/></template>
@@ -526,6 +632,7 @@ onBeforeUnmount(() => {
               <n-input-number v-model:value="editingConfig.reasoningBudget" clearable :min="capability('reasoningBudget').min" :max="capability('reasoningBudget').max" :step="1" style="width: 100%"/>
             </n-form-item>
             <n-alert v-if="capabilities?.profile === 'gemini' && editingConfig.reasoningEffort && editingConfig.reasoningBudget" type="warning">Gemini 推理强度与推理预算不能同时设置，请清除其中一项。</n-alert>
+			</template>
 
             <n-divider title-placement="left">网络设置</n-divider>
             <n-form-item>
@@ -537,6 +644,22 @@ onBeforeUnmount(() => {
               <n-switch v-model:value="editingConfig.httpProxyEnabled"/>
             </n-form-item>
             <n-form-item v-if="editingConfig.httpProxyEnabled" label="代理地址"><n-input v-model:value="editingConfig.httpProxy" placeholder="http://127.0.0.1:7890"/></n-form-item>
+            <n-form-item label="自定义 Header">
+              <n-space vertical style="width: 100%" :size="8">
+                <n-space :size="6">
+                  <n-button size="small" dashed @click="addHeaderPair">+ 添加 Header</n-button>
+                  <n-button size="small" dashed type="primary" @click="fillCodeBuddyHeaders">填充 CodeBuddy 模板</n-button>
+                </n-space>
+                <template v-if="!headerPairs.length">
+                  <n-text v-pre depth="3" style="font-size: 12px">用于需要额外 Header 的 OpenAI 兼容网关；值支持 {{sessionId}} 与 {{uuid}}。</n-text>
+                </template>
+                <div v-for="(pair, index) in headerPairs" :key="index" style="display: flex; gap: 8px; align-items: center">
+                  <n-input v-model:value="pair.key" size="small" placeholder="Header 名称" style="width: 190px"/>
+                  <n-input v-model:value="pair.value" size="small" placeholder="Header 值" style="flex: 1"/>
+                  <n-button size="small" quaternary type="error" @click="removeHeaderPair(index)">删除</n-button>
+                </div>
+              </n-space>
+            </n-form-item>
 
             <n-alert v-if="incompatibleFields.length" type="warning" style="margin-top: 12px">
               已保存参数中有当前模型不支持的项目：{{ incompatibleFields.map(item => item.label).join('、') }}。这些值不会被静默删除，也不会发送给模型；请确认后手动清除。

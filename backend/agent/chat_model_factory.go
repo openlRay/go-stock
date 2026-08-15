@@ -89,10 +89,14 @@ func createChatModel(ctx context.Context, aiConfig data.AIConfig) (model.ToolCal
 	if timeout <= 0 {
 		timeout = 300 * time.Second
 	}
-	maxTok := effective.MaxTokens
+	// MaxTokens 是输出上限；ContextWindow 单独描述输入与输出的总容量。
+	// 对旧配置使用内置模型表和安全默认值兜底，避免把整个上下文窗口作为输出预算发送。
+	contextWindow := resolveContextWindow(aiConfig)
+	maxTok := resolveOutputMaxTokens(aiConfig, contextWindow)
 	if maxTok <= 0 {
 		maxTok = 4096
 	}
+	outputMaxTokens := &maxTok
 
 	p := effective.Provider
 	logger.SugaredLogger.Infof("createChatModel provider=%s base=%q model=%q", p, aiConfig.BaseUrl, aiConfig.ModelName)
@@ -135,8 +139,8 @@ func createChatModel(ctx context.Context, aiConfig data.AIConfig) (model.ToolCal
 			APIKey:    aiConfig.ApiKey,
 			BaseURL:   baseURL,
 			Model:     aiConfig.ModelName,
+			MaxTokens: outputMaxTokens,
 			Timeout:   timeout,
-			MaxTokens: &maxTok,
 		}
 		cfg.Temperature = temperature
 		cfg.TopP = topP
@@ -190,17 +194,19 @@ func createChatModel(ctx context.Context, aiConfig data.AIConfig) (model.ToolCal
 		return openrouter.NewChatModel(ctx, cfg)
 
 	case data.AIProviderAnthropic:
-		maxOut := aiConfig.MaxTokens
+		maxOut := maxTok
 		if maxOut <= 0 {
 			maxOut = 8192
 		}
+		httpClient := buildChatModelHTTPClient(timeout, aiConfig)
+		if httpClient == nil {
+			httpClient = &http.Client{Timeout: timeout}
+		}
 		cfg := &claude.Config{
-			APIKey:    aiConfig.ApiKey,
-			Model:     aiConfig.ModelName,
-			MaxTokens: maxOut,
-			HTTPClient: &http.Client{
-				Timeout: timeout,
-			},
+			APIKey:     aiConfig.ApiKey,
+			Model:      aiConfig.ModelName,
+			MaxTokens:  maxOut,
+			HTTPClient: httpClient,
 		}
 		cfg.Temperature = temperature
 		cfg.TopP = topP
@@ -311,8 +317,8 @@ func createChatModel(ctx context.Context, aiConfig data.AIConfig) (model.ToolCal
 		if effective.ReasoningMode != data.ReasoningModeOff {
 			deepseekCfg.ThinkingConfig = &deepseek.ThinkingConfig{Type: "enabled"}
 		}
-		if proxyClient := buildProxyHTTPClient(timeout, aiConfig); proxyClient != nil {
-			deepseekCfg.HTTPClient = proxyClient
+		if httpClient := buildChatModelHTTPClient(timeout, aiConfig); httpClient != nil {
+			deepseekCfg.HTTPClient = httpClient
 		}
 		return deepseek.NewChatModel(ctx, deepseekCfg)
 
@@ -345,8 +351,8 @@ func createChatModel(ctx context.Context, aiConfig data.AIConfig) (model.ToolCal
 		if p == data.AIProviderOpenAI && effective.ReasoningEffort != "" {
 			cfg.ReasoningEffort = einoopenai.ReasoningEffortLevel(effective.ReasoningEffort)
 		}
-		if proxyClient := buildProxyHTTPClient(timeout, aiConfig); proxyClient != nil {
-			cfg.HTTPClient = proxyClient
+		if httpClient := buildChatModelHTTPClient(timeout, aiConfig); httpClient != nil {
+			cfg.HTTPClient = httpClient
 		}
 		return einoopenai.NewChatModel(ctx, cfg)
 	}
@@ -359,20 +365,59 @@ func derefFloat32(value *float32) float32 {
 	return *value
 }
 
-// buildProxyHTTPClient 构建带代理的HTTP客户端，若未配置代理则返回nil
-func buildProxyHTTPClient(timeout time.Duration, config data.AIConfig) *http.Client {
-	if !config.HttpProxyEnabled || config.HttpProxy == "" {
+// headerInjectTransport 包装 http.RoundTripper，在每次请求时注入自定义 Header
+// （支持模板变量展开，如 {{sessionId}}、{{uuid}}）。
+type headerInjectTransport struct {
+	base      http.RoundTripper
+	headers   map[string]string // 含模板变量的原始 header 值
+	sessionId string
+}
+
+func (t *headerInjectTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	cloned := req.Clone(req.Context())
+	for k, v := range t.headers {
+		cloned.Header.Set(k, data.ExpandHeaderVars(v, t.sessionId))
+	}
+	return t.base.RoundTrip(cloned)
+}
+
+// buildChatModelHTTPClient 构建当前 AI 配置专属的代理和 Header transport。
+// 代理必须使用 request-local 配置，不能回退到全局 Settings 以免不同模型配置互相污染。
+func buildChatModelHTTPClient(timeout time.Duration, config data.AIConfig) *http.Client {
+	headers := data.ParseHeaders(config.ExtraHeaders)
+	hasHeaders := len(headers) > 0
+	hasProxy := config.HttpProxyEnabled && config.HttpProxy != ""
+
+	if !hasHeaders && !hasProxy {
 		return nil
 	}
-	proxyURL, err := url.Parse(config.HttpProxy)
-	if err != nil {
-		logger.SugaredLogger.Warnf("解析HTTP代理失败: %v", err)
-		return nil
+
+	var transport http.RoundTripper = http.DefaultTransport
+	if hasProxy {
+		proxyURL, err := url.Parse(config.HttpProxy)
+		if err != nil {
+			logger.SugaredLogger.Warnf("解析HTTP代理失败: %v", err)
+		} else {
+			if base, ok := http.DefaultTransport.(*http.Transport); ok {
+				proxyTransport := base.Clone()
+				proxyTransport.Proxy = http.ProxyURL(proxyURL)
+				transport = proxyTransport
+			} else {
+				transport = &http.Transport{Proxy: http.ProxyURL(proxyURL)}
+			}
+		}
 	}
+
+	if hasHeaders {
+		transport = &headerInjectTransport{
+			base:      transport,
+			headers:   headers,
+			sessionId: config.SessionId,
+		}
+	}
+
 	return &http.Client{
-		Transport: &http.Transport{
-			Proxy: http.ProxyURL(proxyURL),
-		},
-		Timeout: timeout,
+		Transport: transport,
+		Timeout:   timeout,
 	}
 }

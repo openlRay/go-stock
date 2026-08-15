@@ -31,9 +31,11 @@ func withAIConfigTestDB(t *testing.T) {
 func validTestAIConfig(name string) *AIConfig {
 	return &AIConfig{
 		Name: name, BaseUrl: "http://localhost:8317/v1", ApiKey: "secret", ModelName: "gpt-5.6-sol",
-		MaxTokens: 8192, Temperature: 0, TemperatureConfigured: true, TimeOut: 300,
+		ModelType: "chat", MaxTokens: 8192, ContextWindow: 128000,
+		Temperature: 0, TemperatureConfigured: true, TimeOut: 300,
 		TopP: pointer(0.8), StopSequences: []string{"END", "DONE"}, ResponseFormat: "json_object",
 		ReasoningMode: ReasoningModeOn, ReasoningEffort: "high",
+		ExtraHeaders: `{"x-team-id":"team"}`, EmbeddingModel: "text-embedding-3-small",
 	}
 }
 
@@ -57,6 +59,9 @@ func TestAIConfigCRUDRoundTrip(t *testing.T) {
 	}
 	if !stored.TemperatureConfigured || stored.Temperature != 0 || len(stored.StopSequences) != 2 || stored.StopSequences[1] != "DONE" {
 		t.Fatalf("optional values did not round-trip: %+v", stored)
+	}
+	if stored.ModelType != "chat" || stored.ContextWindow != 128000 || stored.ExtraHeaders != `{"x-team-id":"team"}` || stored.EmbeddingModel != "text-embedding-3-small" {
+		t.Fatalf("upstream AI config fields did not round-trip: %+v", stored)
 	}
 
 	stored.TopP = nil
@@ -88,6 +93,47 @@ func TestAIConfigCRUDRoundTrip(t *testing.T) {
 	deleted, err := deleteAIConfig(copyOne.ID)
 	if err != nil || !deleted.Success {
 		t.Fatalf("deleteAIConfig() = %+v, %v", deleted, err)
+	}
+}
+
+func TestEmbeddingAIConfigDoesNotParticipateInChatDefault(t *testing.T) {
+	withAIConfigTestDB(t)
+
+	embedding := validTestAIConfig("embedding")
+	embedding.ModelType = "embedding"
+	embedding.ModelName = "text-embedding-3-small"
+	embedding.MaxTokens = 0
+	createdEmbedding, err := createAIConfig(embedding)
+	if err != nil {
+		t.Fatalf("create embedding config: %v", err)
+	}
+	if createdEmbedding.IsDefault {
+		t.Fatal("embedding config must not become the default chat model")
+	}
+
+	chat, err := createAIConfig(validTestAIConfig("chat"))
+	if err != nil {
+		t.Fatalf("create chat config: %v", err)
+	}
+	if !chat.IsDefault {
+		t.Fatal("first chat config should become the default")
+	}
+	if _, err := setDefaultAIConfig(createdEmbedding.ID); err == nil {
+		t.Fatal("embedding config should be rejected as the default chat model")
+	}
+
+	configs := []*AIConfig{createdEmbedding, chat}
+	resolved, ok := ResolveAIConfig(configs, int(createdEmbedding.ID))
+	if !ok || resolved.ID != chat.ID {
+		t.Fatalf("embedding explicit ID should fall back to chat default: %+v, %v", resolved, ok)
+	}
+}
+
+func TestValidateAIConfigRejectsInvalidExtraHeaders(t *testing.T) {
+	config := validTestAIConfig("invalid headers")
+	config.ExtraHeaders = `{"x-test":"line\nbreak"}`
+	if err := ValidateAIConfig(config); err == nil {
+		t.Fatal("header values containing newlines should fail")
 	}
 }
 

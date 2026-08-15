@@ -56,6 +56,10 @@ type Settings struct {
 	WindowWidth            int    `json:"windowWidth"`
 	WindowHeight           int    `json:"windowHeight"`
 	PromptPlazaApiBase     string `json:"promptPlazaApiBase" gorm:"column:prompt_plaza_api_base"`
+	// LongTermMemoryAiConfigId 长期记忆向量检索绑定的 AIConfig ID。
+	// 0=自动模式（优先 ModelType=embedding 的服务）；>0=用指定 AIConfig。
+	// 用于让用户明确指定长期记忆用哪个向量服务，避免自动选错。
+	LongTermMemoryAiConfigId int `json:"longTermMemoryAiConfigId" gorm:"column:long_term_memory_ai_config_id;default:0"`
 }
 
 func (receiver Settings) TableName() string {
@@ -63,14 +67,18 @@ func (receiver Settings) TableName() string {
 }
 
 type AIConfig struct {
-	ID                    uint `gorm:"primarykey"`
-	CreatedAt             time.Time
-	UpdatedAt             time.Time
-	Name                  string   `json:"name"`
-	BaseUrl               string   `json:"baseUrl"`
-	ApiKey                string   `json:"apiKey"`
-	ModelName             string   `json:"modelName"`
-	MaxTokens             int      `json:"maxTokens"`
+	ID        uint `gorm:"primarykey"`
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	Name      string `json:"name"`
+	BaseUrl   string `json:"baseUrl"`
+	ApiKey    string `json:"apiKey"`
+	ModelName string `json:"modelName"`
+	// ModelType 区分文本对话模型与向量模型；空值继续按 chat 兼容旧配置。
+	ModelType string `json:"modelType" gorm:"column:model_type;default:'chat'"`
+	MaxTokens int    `json:"maxTokens"`
+	// ContextWindow 表示输入与输出合计的上下文容量，0 时由运行时推导。
+	ContextWindow         int      `json:"contextWindow" gorm:"column:context_window"`
 	MaxCompletionTokens   *int     `json:"maxCompletionTokens"`
 	Temperature           float64  `json:"temperature"`
 	TemperatureConfigured bool     `json:"temperatureConfigured"`
@@ -89,7 +97,11 @@ type AIConfig struct {
 	HttpProxyEnabled      bool     `json:"httpProxyEnabled"`
 	SessionId             string   `json:"sessionId" gorm:"index;size:64"`
 	Thinking              bool     `json:"thinking"`
-	IsDefault             bool     `json:"isDefault" gorm:"column:is_default;not null;default:false"`
+	// ExtraHeaders 支持需要额外请求头的 OpenAI 兼容网关。
+	ExtraHeaders string `json:"extraHeaders" gorm:"type:text"`
+	// EmbeddingModel 兼容在对话配置上单独指定向量模型的旧用法。
+	EmbeddingModel string `json:"embeddingModel" gorm:"column:embedding_model"`
+	IsDefault      bool   `json:"isDefault" gorm:"column:is_default;not null;default:false"`
 }
 
 func (AIConfig) TableName() string {
@@ -142,47 +154,48 @@ func UpdateConfig(s *SettingConfig) string {
 	db.Dao.Model(&Settings{}).Count(&count)
 	if count > 0 {
 		result := db.Dao.Model(&Settings{}).Where("id=?", s.ID).Updates(map[string]any{
-			"local_push_enable":          s.LocalPushEnable,
-			"ding_push_enable":           s.DingPushEnable,
-			"ding_robot":                 s.DingRobot,
-			"feishu_push_enable":         s.FeishuPushEnable,
-			"feishu_robot":               s.FeishuRobot,
-			"feishu_secret":              s.FeishuSecret,
-			"feishu_bot_enable":          s.FeishuBotEnable,
-			"feishu_app_id":              s.FeishuAppID,
-			"feishu_app_secret":          s.FeishuAppSecret,
-			"feishu_bot_ai_config_id":    s.FeishuBotAiConfigId,
-			"feishu_bot_sys_prompt_id":   s.FeishuBotSysPromptId,
-			"feishu_bot_enable_tools":    s.FeishuBotEnableTools,
-			"feishu_bot_thinking":        s.FeishuBotThinking,
-			"feishu_bot_agent_mode":      s.FeishuBotAgentMode,
-			"update_basic_info_on_start": s.UpdateBasicInfoOnStart,
-			"refresh_interval":           s.RefreshInterval,
-			"open_ai_enable":             s.OpenAiEnable,
-			"tushare_token":              s.TushareToken,
-			"prompt":                     s.Prompt,
-			"check_update":               s.CheckUpdate,
-			"update_channel":             s.UpdateChannel,
-			"question_template":          s.QuestionTemplate,
-			"crawl_time_out":             s.CrawlTimeOut,
-			"k_days":                     s.KDays,
-			"enable_danmu":               s.EnableDanmu,
-			"browser_path":               s.BrowserPath,
-			"enable_news":                s.EnableNews,
-			"dark_theme":                 s.DarkTheme,
-			"enable_fund":                s.EnableFund,
-			"enable_push_news":           s.EnablePushNews,
-			"enable_only_push_red_news":  s.EnableOnlyPushRedNews,
-			"sponsor_code":               s.SponsorCode,
-			"http_proxy":                 s.HttpProxy,
-			"http_proxy_enabled":         s.HttpProxyEnabled,
-			"enable_agent":               s.EnableAgent,
-			"qgqp_b_id":                  s.QgqpBId,
-			"iwencai_api_key":            s.IwencaiApiKey,
-			"em_api_key":                 s.EmApiKey,
-			"window_width":               s.WindowWidth,
-			"window_height":              s.WindowHeight,
-			"prompt_plaza_api_base":      s.PromptPlazaApiBase,
+			"local_push_enable":             s.LocalPushEnable,
+			"ding_push_enable":              s.DingPushEnable,
+			"ding_robot":                    s.DingRobot,
+			"feishu_push_enable":            s.FeishuPushEnable,
+			"feishu_robot":                  s.FeishuRobot,
+			"feishu_secret":                 s.FeishuSecret,
+			"feishu_bot_enable":             s.FeishuBotEnable,
+			"feishu_app_id":                 s.FeishuAppID,
+			"feishu_app_secret":             s.FeishuAppSecret,
+			"feishu_bot_ai_config_id":       s.FeishuBotAiConfigId,
+			"feishu_bot_sys_prompt_id":      s.FeishuBotSysPromptId,
+			"feishu_bot_enable_tools":       s.FeishuBotEnableTools,
+			"feishu_bot_thinking":           s.FeishuBotThinking,
+			"feishu_bot_agent_mode":         s.FeishuBotAgentMode,
+			"update_basic_info_on_start":    s.UpdateBasicInfoOnStart,
+			"refresh_interval":              s.RefreshInterval,
+			"open_ai_enable":                s.OpenAiEnable,
+			"tushare_token":                 s.TushareToken,
+			"prompt":                        s.Prompt,
+			"check_update":                  s.CheckUpdate,
+			"update_channel":                s.UpdateChannel,
+			"question_template":             s.QuestionTemplate,
+			"crawl_time_out":                s.CrawlTimeOut,
+			"k_days":                        s.KDays,
+			"enable_danmu":                  s.EnableDanmu,
+			"browser_path":                  s.BrowserPath,
+			"enable_news":                   s.EnableNews,
+			"dark_theme":                    s.DarkTheme,
+			"enable_fund":                   s.EnableFund,
+			"enable_push_news":              s.EnablePushNews,
+			"enable_only_push_red_news":     s.EnableOnlyPushRedNews,
+			"sponsor_code":                  s.SponsorCode,
+			"http_proxy":                    s.HttpProxy,
+			"http_proxy_enabled":            s.HttpProxyEnabled,
+			"enable_agent":                  s.EnableAgent,
+			"qgqp_b_id":                     s.QgqpBId,
+			"iwencai_api_key":               s.IwencaiApiKey,
+			"em_api_key":                    s.EmApiKey,
+			"window_width":                  s.WindowWidth,
+			"window_height":                 s.WindowHeight,
+			"prompt_plaza_api_base":         s.PromptPlazaApiBase,
+			"long_term_memory_ai_config_id": s.LongTermMemoryAiConfigId,
 		})
 		if result.Error != nil {
 			logger.SugaredLogger.Errorf("更新配置失败: %v", result.Error)

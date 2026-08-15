@@ -68,14 +68,17 @@ func AutoMigrate() {
 	Dao.AutoMigrate(&models.MarketStatistic{})
 	Dao.AutoMigrate(&models.StockTransactionCache{})
 	Dao.AutoMigrate(&models.StockTransactionCacheMeta{})
+	Dao.AutoMigrate(&models.AgentFeedback{})
+	Dao.AutoMigrate(&models.AiRecommendBacktest{})
 	if err := migrateAIConfigDefault(); err != nil {
 		fmt.Printf("migrate default AI config failed: %v\n", err)
 	}
 }
 
 type aiConfigDefaultMigration struct {
-	ID        uint `gorm:"primarykey"`
-	IsDefault bool `gorm:"column:is_default;not null;default:false"`
+	ID        uint   `gorm:"primarykey"`
+	IsDefault bool   `gorm:"column:is_default;not null;default:false"`
+	ModelType string `gorm:"column:model_type;default:'chat'"`
 }
 
 func (aiConfigDefaultMigration) TableName() string {
@@ -84,7 +87,7 @@ func (aiConfigDefaultMigration) TableName() string {
 
 // migrateAIConfigDefault runs synchronously during db.Init so all later
 // settings reads see the new column. It also repairs legacy zero/multiple
-// defaults once at startup, keeping the lowest stable ID.
+// defaults once at startup, keeping the lowest stable chat-model ID.
 func migrateAIConfigDefault() error {
 	if err := Dao.AutoMigrate(&aiConfigDefaultMigration{}); err != nil {
 		return err
@@ -93,12 +96,25 @@ func migrateAIConfigDefault() error {
 		if err := tx.Exec(`UPDATE ai_config
 			SET is_default = FALSE
 			WHERE is_default = TRUE
-			  AND id <> (SELECT id FROM ai_config WHERE is_default = TRUE ORDER BY id ASC LIMIT 1)`).Error; err != nil {
+			  AND COALESCE(NULLIF(LOWER(TRIM(model_type)), ''), 'chat') <> 'chat'`).Error; err != nil {
+			return err
+		}
+		if err := tx.Exec(`UPDATE ai_config
+			SET is_default = FALSE
+			WHERE is_default = TRUE
+			  AND id <> (SELECT id FROM ai_config
+			             WHERE is_default = TRUE
+			               AND COALESCE(NULLIF(LOWER(TRIM(model_type)), ''), 'chat') = 'chat'
+			             ORDER BY id ASC LIMIT 1)`).Error; err != nil {
 			return err
 		}
 		return tx.Exec(`UPDATE ai_config
 			SET is_default = TRUE
-			WHERE id = (SELECT id FROM ai_config ORDER BY id ASC LIMIT 1)
-			  AND NOT EXISTS (SELECT 1 FROM ai_config WHERE is_default = TRUE)`).Error
+			WHERE id = (SELECT id FROM ai_config
+			            WHERE COALESCE(NULLIF(LOWER(TRIM(model_type)), ''), 'chat') = 'chat'
+			            ORDER BY id ASC LIMIT 1)
+			  AND NOT EXISTS (SELECT 1 FROM ai_config
+			                  WHERE is_default = TRUE
+			                    AND COALESCE(NULLIF(LOWER(TRIM(model_type)), ''), 'chat') = 'chat')`).Error
 	})
 }

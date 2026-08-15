@@ -458,6 +458,9 @@ func AskAi(o *OpenAi, err error, messages []map[string]interface{}, ch chan map[
 		SetHeader("Authorization", "Bearer "+o.ApiKey).
 		SetHeader("Content-Type", "application/json").
 		SetBody(bodyMap)
+	if extra := BuildExtraHeaders(o.ExtraHeaders, o.ChatSource); len(extra) > 0 {
+		req = req.SetHeaders(extra)
+	}
 	if o.ctx != nil {
 		req = req.SetContext(o.ctx)
 	}
@@ -673,6 +676,9 @@ func AskAiWithToolsDepth(o *OpenAi, err error, messages []map[string]interface{}
 		SetHeader("Authorization", "Bearer "+o.ApiKey).
 		SetHeader("Content-Type", "application/json").
 		SetBody(bodyMap)
+	if extra := BuildExtraHeaders(o.ExtraHeaders, o.ChatSource); len(extra) > 0 {
+		req = req.SetHeaders(extra)
+	}
 	if o.ctx != nil {
 		req = req.SetContext(o.ctx)
 	}

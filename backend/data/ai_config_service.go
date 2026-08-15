@@ -53,22 +53,30 @@ var aiConfigDefaultMu sync.Mutex
 func ResolveAIConfig(configs []*AIConfig, explicitID int) (*AIConfig, bool) {
 	if explicitID > 0 {
 		for _, config := range configs {
-			if config != nil && int(config.ID) == explicitID {
+			if isChatAIConfig(config) && int(config.ID) == explicitID {
 				return config, true
 			}
 		}
 	}
 	for _, config := range configs {
-		if config != nil && config.IsDefault {
+		if isChatAIConfig(config) && config.IsDefault {
 			return config, true
 		}
 	}
 	for _, config := range configs {
-		if config != nil {
+		if isChatAIConfig(config) {
 			return config, true
 		}
 	}
 	return nil, false
+}
+
+func isChatAIConfig(config *AIConfig) bool {
+	if config == nil {
+		return false
+	}
+	modelType := strings.ToLower(strings.TrimSpace(config.ModelType))
+	return modelType == "" || modelType == "chat"
 }
 
 func NormalizeLegacyAIConfig(config *AIConfig) {
@@ -78,6 +86,12 @@ func NormalizeLegacyAIConfig(config *AIConfig) {
 	if !config.TemperatureConfigured && config.Temperature != 0 {
 		config.TemperatureConfigured = true
 	}
+	config.ModelType = strings.ToLower(strings.TrimSpace(config.ModelType))
+	if config.ModelType == "" {
+		config.ModelType = "chat"
+	}
+	config.ExtraHeaders = strings.TrimSpace(config.ExtraHeaders)
+	config.EmbeddingModel = strings.TrimSpace(config.EmbeddingModel)
 	if strings.TrimSpace(config.ReasoningMode) == "" {
 		if config.Thinking {
 			capabilities := GetAIModelCapabilities(config.BaseUrl, config.ModelName)
@@ -190,6 +204,20 @@ func ValidateAIConfig(config *AIConfig) error {
 	config.ReasoningMode = strings.TrimSpace(config.ReasoningMode)
 	config.ReasoningEffort = strings.TrimSpace(config.ReasoningEffort)
 	NormalizeLegacyAIConfig(config)
+	if config.ModelType != "chat" && config.ModelType != "embedding" {
+		return errors.New("模型类型只能是 chat 或 embedding")
+	}
+	if config.ExtraHeaders != "" {
+		var headers map[string]string
+		if err := json.Unmarshal([]byte(config.ExtraHeaders), &headers); err != nil {
+			return errors.New("自定义 Header 必须是字符串键值对 JSON 对象")
+		}
+		for name, value := range headers {
+			if strings.TrimSpace(name) == "" || strings.ContainsAny(name, "\r\n:") || strings.ContainsAny(value, "\r\n") {
+				return errors.New("自定义 Header 包含非法名称或换行符")
+			}
+		}
+	}
 
 	if config.Name == "" || config.BaseUrl == "" || config.ApiKey == "" || config.ModelName == "" {
 		return errors.New("名称、接口地址、API Key 和模型名称均不能为空")
@@ -205,11 +233,16 @@ func ValidateAIConfig(config *AIConfig) error {
 			return err
 		}
 	}
-	if config.MaxTokens <= 0 {
-		return errors.New("最大输出 Token 必须大于 0")
-	}
 	if config.TimeOut <= 0 {
 		return errors.New("超时时间必须大于 0 秒")
+	}
+	// Embedding 配置只用于 /embeddings，不发送对话生成参数。保留这些
+	// 字段便于配置在 chat/embedding 之间切换，但不按对话模型能力校验。
+	if config.ModelType == "embedding" {
+		return nil
+	}
+	if config.MaxTokens <= 0 {
+		return errors.New("最大输出 Token 必须大于 0")
 	}
 
 	capabilities := GetAIModelCapabilities(config.BaseUrl, config.ModelName)
@@ -331,11 +364,11 @@ func createAIConfig(config *AIConfig) (*AIConfig, error) {
 		if err := ensureUniqueAIConfigName(tx, config.Name, 0); err != nil {
 			return err
 		}
-		var count int64
-		if err := tx.Model(&AIConfig{}).Count(&count).Error; err != nil {
+		var chatCount int64
+		if err := tx.Model(&AIConfig{}).Where("model_type = ? OR model_type = '' OR model_type IS NULL", "chat").Count(&chatCount).Error; err != nil {
 			return errors.New("检查默认 AI 配置失败")
 		}
-		config.IsDefault = count == 0
+		config.IsDefault = isChatAIConfig(config) && chatCount == 0
 		if err := tx.Create(config).Error; err != nil {
 			logger.SugaredLogger.Errorf("创建 AI 配置失败: %v", err)
 			return errors.New("创建 AI 配置失败")
@@ -363,6 +396,9 @@ func updateAIConfig(config *AIConfig) (*AIConfig, error) {
 			return nil, errors.New("要更新的 AI 配置不存在")
 		}
 		return nil, errors.New("查询 AI 配置失败")
+	}
+	if existing.IsDefault && !isChatAIConfig(config) {
+		return nil, errors.New("默认对话配置不能改为向量模型，请先设置其他默认配置")
 	}
 	if err := db.Dao.Model(&AIConfig{}).Where("id = ?", config.ID).Updates(aiConfigUpdateMap(config)).Error; err != nil {
 		logger.SugaredLogger.Errorf("更新 AI 配置失败(id=%d): %v", config.ID, err)
@@ -498,6 +534,9 @@ func setDefaultAIConfig(id uint) (*AIConfig, error) {
 			}
 			return errors.New("查询 AI 配置失败")
 		}
+		if !isChatAIConfig(&target) {
+			return errors.New("向量模型不能设为默认对话配置")
+		}
 		if err := tx.Model(&AIConfig{}).Where("is_default = ?", true).Update("is_default", false).Error; err != nil {
 			return errors.New("清除原默认 AI 配置失败")
 		}
@@ -525,14 +564,20 @@ func SetDefaultAIConfig(id uint) (*AIConfig, error) {
 
 func ensureSingleDefaultAIConfig(database *gorm.DB) error {
 	var configs []AIConfig
-	if err := database.Select("id", "is_default").Order("id ASC").Find(&configs).Error; err != nil {
+	if err := database.Select("id", "is_default", "model_type").Order("id ASC").Find(&configs).Error; err != nil {
 		return err
 	}
-	if len(configs) == 0 {
-		return nil
+	chatConfigs := make([]AIConfig, 0, len(configs))
+	for index := range configs {
+		if isChatAIConfig(&configs[index]) {
+			chatConfigs = append(chatConfigs, configs[index])
+		}
 	}
-	keeperID := configs[0].ID
-	for _, config := range configs {
+	if len(chatConfigs) == 0 {
+		return database.Model(&AIConfig{}).Where("is_default = ?", true).Update("is_default", false).Error
+	}
+	keeperID := chatConfigs[0].ID
+	for _, config := range chatConfigs {
 		if config.IsDefault {
 			keeperID = config.ID
 			break
@@ -551,7 +596,8 @@ func aiConfigUpdateMap(config *AIConfig) map[string]any {
 	stopSequences, _ := json.Marshal(config.StopSequences)
 	return map[string]any{
 		"name": config.Name, "base_url": config.BaseUrl, "api_key": config.ApiKey,
-		"model_name": config.ModelName, "max_tokens": config.MaxTokens,
+		"model_name": config.ModelName, "model_type": config.ModelType,
+		"max_tokens": config.MaxTokens, "context_window": config.ContextWindow,
 		"max_completion_tokens": config.MaxCompletionTokens, "temperature": config.Temperature,
 		"temperature_configured": config.TemperatureConfigured, "top_p": config.TopP,
 		"top_k": config.TopK, "presence_penalty": config.PresencePenalty,
@@ -561,6 +607,7 @@ func aiConfigUpdateMap(config *AIConfig) map[string]any {
 		"reasoning_budget": config.ReasoningBudget, "time_out": config.TimeOut,
 		"http_proxy": config.HttpProxy, "http_proxy_enabled": config.HttpProxyEnabled,
 		"session_id": config.SessionId, "thinking": config.Thinking,
+		"extra_headers": config.ExtraHeaders, "embedding_model": config.EmbeddingModel,
 	}
 }
 

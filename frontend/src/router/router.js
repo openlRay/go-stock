@@ -14,7 +14,8 @@ const routes = [
   { path: '/cron-tasks', component: () => import('../components/cron-task-manager.vue'), name: 'cronTasks' },
   { path: '/mcp-servers', component: () => import('../components/mcp-server-manager.vue'), name: 'mcpServers' },
   { path: '/kline-analysis', component: () => import('../components/kline-analysis.vue'), name: 'klineAnalysis' },
-  { path: '/ai-configs', component: () => import('../components/ai-config-manager.vue'), name: 'aiConfigs' }
+  { path: '/ai-configs', component: () => import('../components/ai-config-manager.vue'), name: 'aiConfigs' },
+  { path: '/user-profile', component: () => import('../components/user-profile.vue'), name: 'userProfile' }
 ]
 
 const router = createRouter({

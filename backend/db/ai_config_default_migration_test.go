@@ -51,3 +51,34 @@ func TestMigrateAIConfigDefaultAddsColumnAndRepairsLegacyRows(t *testing.T) {
 		t.Fatalf("repaired defaults = %+v, want only lowest ID 1", defaults)
 	}
 }
+
+func TestMigrateAIConfigDefaultSkipsEmbeddingRows(t *testing.T) {
+	previous := Dao
+	database, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open test db: %v", err)
+	}
+	Dao = database
+	t.Cleanup(func() { Dao = previous })
+
+	if err := Dao.AutoMigrate(&aiConfigDefaultMigration{}); err != nil {
+		t.Fatalf("migrate test table: %v", err)
+	}
+	if err := Dao.Create(&aiConfigDefaultMigration{ModelType: "embedding", IsDefault: true}).Error; err != nil {
+		t.Fatalf("create embedding config: %v", err)
+	}
+	if err := Dao.Create(&aiConfigDefaultMigration{ModelType: "chat"}).Error; err != nil {
+		t.Fatalf("create chat config: %v", err)
+	}
+	if err := migrateAIConfigDefault(); err != nil {
+		t.Fatalf("migrateAIConfigDefault() error = %v", err)
+	}
+
+	var defaults []aiConfigDefaultMigration
+	if err := Dao.Where("is_default = ?", true).Find(&defaults).Error; err != nil {
+		t.Fatalf("read defaults: %v", err)
+	}
+	if len(defaults) != 1 || defaults[0].ModelType != "chat" {
+		t.Fatalf("defaults = %+v, want only chat config", defaults)
+	}
+}
