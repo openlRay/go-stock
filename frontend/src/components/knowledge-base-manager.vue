@@ -594,7 +594,7 @@
           <!-- 添加文档 -->
           <n-card title="添加文档" size="small" :bordered="true">
             <n-tabs type="line" size="small" animated>
-              <n-tab-pane name="file" tab="上传文件（支持多选）">
+              <n-tab-pane v-if="!isWebMode" name="file" tab="上传文件（支持多选）">
                 <n-space vertical :size="8" style="width: 100%">
                   <n-space :size="8" style="width: 100%" align="center">
                     <n-button @click="handlePickFiles" :loading="picking">
@@ -770,6 +770,7 @@ import html2canvas from 'html2canvas'
 import { EventsOn, EventsOff } from '../../wailsjs/runtime'
 import { MdPreview } from 'md-editor-v3'
 import 'md-editor-v3/lib/preview.css'
+import {isWebMode} from '../runtime-env'
 
 // md-editor 主题：跟随应用暗色设置（与 skill-manager 一致）
 const mdTheme = ref('light')

@@ -36,6 +36,7 @@ import {
 } from 'naive-ui'
 import sparkLine from "./stockSparkLine.vue";
 import StockLightweightKlineChart from "./StockLightweightKlineChart.vue";
+import {isWebMode} from '../runtime-env'
 
 const message = useMessage()
 const notify = useNotification()
@@ -779,7 +780,7 @@ onUnmounted(() => {
     <n-button type="primary" ghost @click="handleSearch">搜索</n-button>
     <n-button @click="resetFilter">重置</n-button>
     <n-button type="primary" ghost @click="openAddModal">添加记录</n-button>
-    <n-button :loading="importingRef" type="primary" secondary @click="handleImport">导入记录</n-button>
+    <n-button v-if="!isWebMode" :loading="importingRef" type="primary" secondary @click="handleImport">导入记录</n-button>
   </n-input-group>
 
   <n-grid :cols="7" :x-gap="12" style="margin-top: 12px; padding: 12px; border-radius: 4px">

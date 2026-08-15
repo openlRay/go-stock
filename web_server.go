@@ -29,15 +29,20 @@ var webBindingSource embed.FS
 // 能力替代。它们不进入 Web RPC 表，避免直接 HTTP 请求触发窗口、退出、更新和文件
 // 对话框能力。
 var webDesktopOnlyMethods = map[string]struct{}{
-	"CheckUpdate":        {},
-	"ExportConfig":       {},
-	"ImportSkillPackage": {},
-	"OpenURL":            {},
-	"QuitApp":            {},
-	"RestartAsAdmin":     {},
-	"SaveAsMarkdown":     {},
-	"SaveImage":          {},
-	"SaveWordFile":       {},
+	"CheckUpdate":                   {},
+	"ExportConfig":                  {},
+	"ImportSkillPackage":            {},
+	"ImportTradingRecordsFromExcel": {},
+	"OpenURL":                       {},
+	"PickKBFilePath":                {},
+	"PickKBFilePaths":               {},
+	"QuitApp":                       {},
+	"RestartAsAdmin":                {},
+	"SaveAsMarkdown":                {},
+	"SaveImage":                     {},
+	"SaveWordFile":                  {},
+	"UploadKBFile":                  {},
+	"UploadKBFiles":                 {},
 }
 
 type webRPCRequest struct {

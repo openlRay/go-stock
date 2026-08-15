@@ -30,6 +30,8 @@ func TestLoadWebBindingMethods(t *testing.T) {
 	for _, name := range []string{
 		"GetConfig", "GetStockList", "SummaryStockNews",
 		"GetAnnouncementAIAnalysis", "StartAnnouncementAIAnalysis", "AbortAnnouncementAIAnalysis",
+		"ChatWithAgentKBQA", "CreateKnowledgeBase", "GetUserProfile",
+		"SubmitAgentFeedback", "RunRecommendBacktest",
 	} {
 		if _, ok := methods[name]; !ok {
 			t.Fatalf("binding method %s not found", name)
@@ -38,6 +40,14 @@ func TestLoadWebBindingMethods(t *testing.T) {
 	for name := range webDesktopOnlyMethods {
 		if _, ok := methods[name]; ok {
 			t.Fatalf("desktop-only binding method %s must be hidden from Web RPC", name)
+		}
+	}
+	for _, name := range []string{
+		"ImportTradingRecordsFromExcel", "PickKBFilePath", "PickKBFilePaths",
+		"UploadKBFile", "UploadKBFiles",
+	} {
+		if _, ok := methods[name]; ok {
+			t.Fatalf("server-file method %s must be hidden from Web RPC", name)
 		}
 	}
 }
