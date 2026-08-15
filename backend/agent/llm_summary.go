@@ -39,7 +39,7 @@ const llmSummaryMaxChars = 800
 // llmSummaryTimeout 摘要 LLM 调用超时。
 // 故意基于 context.Background() 派生而非父 ctx：摘要属于独立的旁路任务，
 // 若父 ctx 已接近/超过其自身 deadline，WithTimeout 会立即失效导致频繁降级。
-const llmSummaryTimeout = 30 * time.Second
+const llmSummaryTimeout = 15 * time.Second
 
 // llmSummarizeToolResult 调用 chatModel 生成工具结果摘要。
 //
