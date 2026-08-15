@@ -1,3 +1,4 @@
-{"file":".trellis/spec/backend/web-runtime.md","reason":"编写项目适配 reference 时保护 Web/桌面双模式、Docker 和运行时契约。"}
+{"file":".trellis/spec/backend/runtime-guidelines.md","reason":"编写项目适配 reference 时保护 Web/桌面双模式和运行时契约。"}
+{"file":".trellis/spec/backend/deployment-guidelines.md","reason":"编写项目适配 reference 时保护 Docker 和持久化契约。"}
 {"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"检查普通 merge 后端、前端、生成绑定和配置之间的语义影响。"}
 {"file":".trellis/tasks/08-10-upstream-sync-skill/research-baseline.md","reason":"保留无技能基线中自动 stash、远端推断、自动发布和只看文本冲突等反例。"}

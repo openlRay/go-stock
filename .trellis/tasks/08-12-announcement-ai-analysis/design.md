@@ -74,7 +74,7 @@ Validate `artCode` with a strict length and character allowlist before any reque
 https://pdf.dfcfw.com/pdf/H2_<artCode>_1.pdf
 ```
 
-Use the shared HTTP transport behavior with a request-scoped timeout, no retries, a bounded response size, and expected headers. Reject non-2xx responses, non-PDF content/signature, oversized bodies, and empty data with stable errors.
+Use the shared HTTP transport behavior with a request-scoped timeout, no automatic retries, a bounded response size, and expected headers. Reject non-2xx responses, non-PDF content/signature, oversized bodies, and empty data with stable errors. A strictly recognized Eastmoney bot challenge may complete one time-bounded cookie handshake against the same fixed URL. The sandbox exposes no filesystem, process or network host API and only accepts validated `__tst_status` and `EO_Bot_Ssid` cookies. Unknown scripts, additional cookies, repeated challenge responses and any invalid second response still fail before parsing or model invocation.
 
 Promote `github.com/ledongthuc/pdf` to a direct dependency and parse from an in-memory `bytes.Reader`; no browser, OCR, or persistent temporary file is needed. Normalize extracted whitespace conservatively while retaining paragraphs and table-like line breaks. Treat empty/negligible text as a likely scanned or unsupported PDF and do not call the model.
 
@@ -151,4 +151,3 @@ The fixed-host URL construction prevents SSRF. Bounded downloads and response/bo
 - Web mode receives the same events over SSE and calls the same RPCs; no browser-local file path crosses into the container.
 - If model capability redesign lands concurrently, adapt to its shared capability/effective-parameter APIs and do not revert or duplicate its changes.
 - Rollback can remove the new UI/RPC/worker while leaving the additive table harmless. Do not drop the table automatically.
-

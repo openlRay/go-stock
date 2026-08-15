@@ -75,7 +75,7 @@ func ParseCronScheduleText(ctx context.Context, req CronScheduleParseRequest) (*
 
 	systemPrompt := schema.SystemMessage(`你是定时任务执行时间解析器。把用户的中文描述转换为一个 JSON 对象，不要输出 Markdown、解释或额外字段。
 仅支持以下四种模式：
-1. interval：间隔执行。intervalUnit 只能是 minute 或 hour；分钟 1-59，小时 1-23。
+1. interval：间隔执行。intervalUnit 只能是 minute、hour 或 day；分钟 1-59，小时 1-23，天 1-31。按天间隔在每天 00:00 按月内日期步进执行。
 2. daily：每天固定时间。time 使用 24 小时制 HH:mm。
 3. weekly：每周固定时间。weekdays 是整数数组，0=周日，1=周一，...，6=周六；time 使用 HH:mm。
 4. monthly：每月固定日期和时间。monthDay 为 1-31；time 使用 HH:mm。
@@ -124,7 +124,7 @@ func normalizeCronSchedule(output cronScheduleAIOutput) (*CronScheduleParseResul
 	switch result.Mode {
 	case "interval":
 		unit := strings.ToLower(strings.TrimSpace(output.IntervalUnit))
-		if unit != "minute" && unit != "hour" {
+		if unit != "minute" && unit != "hour" && unit != "day" {
 			return nil, fmt.Errorf("AI 未能识别有效的间隔单位")
 		}
 		maxValue := 59
@@ -132,13 +132,19 @@ func normalizeCronSchedule(output cronScheduleAIOutput) (*CronScheduleParseResul
 		if unit == "hour" {
 			maxValue = 23
 			unitLabel = "小时"
+		} else if unit == "day" {
+			maxValue = 31
+			unitLabel = "天"
 		}
 		if output.IntervalValue < 1 || output.IntervalValue > maxValue {
 			return nil, fmt.Errorf("执行间隔超出支持范围")
 		}
 		result.IntervalValue = output.IntervalValue
 		result.IntervalUnit = unit
-		if unit == "hour" {
+		if unit == "day" {
+			// robfig/cron 的日字段按月内日期计算；*/N 跨月后会从新月份重新步进。
+			result.CronExpr = fmt.Sprintf("0 0 0 */%d * *", output.IntervalValue)
+		} else if unit == "hour" {
 			result.CronExpr = fmt.Sprintf("0 0 */%d * * *", output.IntervalValue)
 		} else {
 			result.CronExpr = fmt.Sprintf("0 */%d * * * *", output.IntervalValue)

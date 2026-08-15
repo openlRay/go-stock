@@ -1,4 +1,4 @@
-{"file":".trellis/spec/backend/web-runtime.md","reason":"New App methods must remain available through the binding-derived Web RPC allowlist without crossing desktop-only boundaries."}
+{"file":".trellis/spec/backend/runtime-guidelines.md","reason":"New App methods must remain available through the binding-derived Web RPC allowlist without crossing desktop-only boundaries."}
 {"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"AI configuration fields must survive the Vue/Wails/Go/SQLite/runtime/request round-trip across direct chat and Agent consumers."}
 {"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Provider detection, capability rules, validation, and request-field construction need one shared source rather than duplicated switches."}
 {"file":".trellis/tasks/08-12-ai-model-config-redesign/research/model-capability-matrix.md","reason":"Defines the provider-supported parameter matrix and conservative fallback required during implementation."}

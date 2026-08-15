@@ -27,6 +27,7 @@ Extend `AIConfig` with structured optional fields:
 ```go
 MaxCompletionTokens *int
 Temperature         *float64
+TemperatureConfigured bool
 TopP                *float64
 TopK                *int
 PresencePenalty     *float64
@@ -37,6 +38,7 @@ ResponseFormat      string   // empty/text/json_object
 ReasoningMode       string   // off/auto/on
 ReasoningEffort     string
 ReasoningBudget     *int
+IsDefault           bool
 ```
 
 Compatibility rules:
@@ -91,6 +93,20 @@ The transaction checks:
 
 Malformed unrelated cron JSON does not block deletion, but malformed JSON that appears to contain the target key is logged without secrets and returns a safe validation error so a possible reference is not silently orphaned.
 
+## Global default model contract
+
+All callers share one model-resolution order:
+
+1. a positive explicit ID that still exists;
+2. the persisted `is_default=true` row;
+3. the lowest stable ID as a legacy-data compatibility fallback.
+
+The first created configuration becomes default. Creating later configurations does not replace it, copying never copies the default flag, and deleting the default promotes the lowest remaining ID inside the delete transaction. Normal update RPCs cannot change `isDefault`; only `SetDefaultAIConfig(id)` owns default switching.
+
+`SetDefaultAIConfig` clears the old marker and sets the target marker in one database transaction, then refreshes runtime settings and emits `aiConfigsChanged`. Zero or missing IDs fail without clearing the current default.
+
+Startup migration runs synchronously during `db.Init`: add `is_default` before any settings read, repair multiple defaults by keeping the lowest marked ID, and assign the lowest row when legacy data has no default. The migration is idempotent and must not be moved into lazy settings reads.
+
 ## Effective parameter resolver
 
 Create a pure resolver with inputs `(savedConfig, sessionThinkingEnabled)` and output `(EffectiveAIParameters, warnings, error)`.
@@ -118,7 +134,7 @@ For direct requests, centralize construction of the common generation/reasoning 
 
 ## Wails and Web compatibility
 
-Regenerate `frontend/wailsjs/go/main/App.js`, `App.d.ts`, and `models.ts` after adding methods/types. `web_server.go` derives its RPC allowlist from generated `App.js`, so successful binding generation makes the new APIs available in Web mode while preserving the existing exclusions in `.trellis/spec/backend/web-runtime.md`.
+Regenerate `frontend/wailsjs/go/main/App.js`, `App.d.ts`, and `models.ts` after adding methods/types. `web_server.go` derives its RPC allowlist from generated `App.js`, so successful binding generation makes the new APIs available in Web mode while preserving the desktop-only exclusions documented by the backend runtime guidelines.
 
 ## Security and error handling
 
@@ -132,3 +148,14 @@ Regenerate `frontend/wailsjs/go/main/App.js`, `App.d.ts`, and `models.ts` after 
 - Schema additions are backward compatible; rollback to an older binary ignores new columns.
 - The legacy bulk update method stays available for imports and can serve as a temporary UI fallback during development, but the released manager must use single-item RPCs.
 - If a provider mapping proves unstable, remove that field from its backend capability profile; stored values remain in SQLite and the UI shows them as incompatible rather than deleting them.
+
+## Validation and regression matrix
+
+- Create rejects a nonzero ID; update/copy/delete/default-switch reject zero or missing IDs.
+- Required text is trimmed; base URL and an enabled proxy must be valid HTTP(S) URLs. Preset base URLs are suggestions, not an allowlist.
+- Optional numeric values preserve explicit zero and reject NaN, infinity, unsupported fields and capability-range violations.
+- `reasoningMode=off` rejects effort/budget; Gemini effort and budget are mutually exclusive; Claude `on` requires a budget smaller than `maxTokens`.
+- Direct requests send either `max_tokens` or `max_completion_tokens`, never both.
+- A session-level thinking override operates on a copy: disabling strips reasoning fields; enabling preserves the saved mode, including a saved `off`.
+- A referenced delete returns every recognized reference and leaves the row unchanged; malformed possible-reference JSON fails closed.
+- Provider, resolver, persistence, default migration, binding and frontend build tests must cover the exact behavior above. Manual UI verification must prove that preset and pasted custom HTTP(S) base URLs remain editable and reach backend validation unchanged.

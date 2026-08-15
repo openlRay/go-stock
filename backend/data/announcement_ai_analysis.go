@@ -22,6 +22,7 @@ import (
 
 	"github.com/go-resty/resty/v2"
 	"github.com/ledongthuc/pdf"
+	"github.com/robertkrimen/otto"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
@@ -30,16 +31,19 @@ const (
 	AnnouncementAIPromptVersion = "announcement-analysis-v1"
 	AnnouncementAIInstructionID = "announcement-source-only-analysis"
 
-	announcementPDFBaseURL       = "https://pdf.dfcfw.com/pdf/"
-	announcementPDFMaxBytes      = 30 * 1024 * 1024
-	announcementPDFTimeout       = 45 * time.Second
-	announcementDefaultContext   = 200000
-	announcementOutputReserve    = 8192
-	announcementMessageOverhead  = 96
-	announcementMinimumTextRunes = 20
+	announcementPDFBaseURL        = "https://pdf.dfcfw.com/pdf/"
+	announcementPDFMaxBytes       = 30 * 1024 * 1024
+	announcementPDFTimeout        = 45 * time.Second
+	announcementDefaultContext    = 200000
+	announcementOutputReserve     = 8192
+	announcementMessageOverhead   = 96
+	announcementMinimumTextRunes  = 20
+	announcementChallengeMaxBytes = 4 * 1024
+	announcementChallengeTimeout  = time.Second
 )
 
 var announcementArtCodePattern = regexp.MustCompile(`^[A-Za-z0-9_-]{6,80}$`)
+var announcementChallengeCookieValuePattern = regexp.MustCompile(`^[A-Za-z0-9#._~-]{1,128}$`)
 
 type AnnouncementStreamChunk struct {
 	Content    string
@@ -178,37 +182,23 @@ func downloadAnnouncementPDF(ctx context.Context, client *resty.Client, sourceUR
 	if client == nil {
 		return nil, models.NewAnnouncementAIError("download_failed", "公告原文下载失败，请稍后重试", nil)
 	}
-	resp, err := client.R().
-		SetContext(ctx).
-		SetDoNotParseResponse(true).
-		SetHeader("Accept", "application/pdf").
-		SetHeader("User-Agent", "Mozilla/5.0 go-stock announcement analysis").
-		Get(sourceURL)
+	data, mediaType, err := fetchAnnouncementPDF(ctx, client, sourceURL, nil)
 	if err != nil {
-		if errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
-			return nil, context.Canceled
+		return nil, err
+	}
+	if isAnnouncementBotChallenge(data) {
+		cookies, challengeErr := solveAnnouncementBotChallenge(ctx, data)
+		if challengeErr != nil {
+			if errors.Is(challengeErr, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
+				return nil, context.Canceled
+			}
+			return nil, models.NewAnnouncementAIError("download_failed", "公告原文下载遇到上游访问验证，请稍后重试", challengeErr)
 		}
-		return nil, models.NewAnnouncementAIError("download_failed", "公告原文下载失败，请检查网络后重试", err)
+		data, mediaType, err = fetchAnnouncementPDF(ctx, client, sourceURL, cookies)
+		if err != nil {
+			return nil, err
+		}
 	}
-	defer resp.RawBody().Close()
-	if resp.StatusCode() < http.StatusOK || resp.StatusCode() >= http.StatusMultipleChoices {
-		return nil, models.AnnouncementAIErrorf("download_failed", "公告原文下载失败（HTTP %d），请稍后重试", resp.StatusCode())
-	}
-	contentLength := resp.RawResponse.ContentLength
-	if contentLength > announcementPDFMaxBytes {
-		return nil, models.NewAnnouncementAIError("pdf_too_large", "公告 PDF 超过 30MB，暂不支持 AI 解读", nil)
-	}
-	data, readErr := io.ReadAll(io.LimitReader(resp.RawBody(), announcementPDFMaxBytes+1))
-	if readErr != nil {
-		return nil, models.NewAnnouncementAIError("download_failed", "读取公告原文失败，请稍后重试", readErr)
-	}
-	if len(data) == 0 {
-		return nil, models.NewAnnouncementAIError("download_failed", "公告原文为空，请稍后重试", nil)
-	}
-	if len(data) > announcementPDFMaxBytes {
-		return nil, models.NewAnnouncementAIError("pdf_too_large", "公告 PDF 超过 30MB，暂不支持 AI 解读", nil)
-	}
-	mediaType, _, _ := mime.ParseMediaType(resp.Header().Get("Content-Type"))
 	if mediaType != "" && mediaType != "application/pdf" && mediaType != "application/octet-stream" {
 		return nil, models.NewAnnouncementAIError("not_pdf", "公告原文不是有效的 PDF 文件，请打开原文核验", nil)
 	}
@@ -216,6 +206,135 @@ func downloadAnnouncementPDF(ctx context.Context, client *resty.Client, sourceUR
 		return nil, models.NewAnnouncementAIError("not_pdf", "公告原文不是有效的 PDF 文件，请打开原文核验", nil)
 	}
 	return data, nil
+}
+
+func fetchAnnouncementPDF(ctx context.Context, client *resty.Client, sourceURL string, cookies []*http.Cookie) ([]byte, string, error) {
+	request := client.R().
+		SetContext(ctx).
+		SetDoNotParseResponse(true).
+		SetHeader("Accept", "application/pdf").
+		SetHeader("User-Agent", "Mozilla/5.0 go-stock announcement analysis")
+	if len(cookies) > 0 {
+		request.SetCookies(cookies)
+	}
+	resp, err := request.Get(sourceURL)
+	if err != nil {
+		if errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) {
+			return nil, "", context.Canceled
+		}
+		return nil, "", models.NewAnnouncementAIError("download_failed", "公告原文下载失败，请检查网络后重试", err)
+	}
+	defer resp.RawBody().Close()
+	if resp.StatusCode() < http.StatusOK || resp.StatusCode() >= http.StatusMultipleChoices {
+		return nil, "", models.AnnouncementAIErrorf("download_failed", "公告原文下载失败（HTTP %d），请稍后重试", resp.StatusCode())
+	}
+	contentLength := resp.RawResponse.ContentLength
+	if contentLength > announcementPDFMaxBytes {
+		return nil, "", models.NewAnnouncementAIError("pdf_too_large", "公告 PDF 超过 30MB，暂不支持 AI 解读", nil)
+	}
+	data, readErr := io.ReadAll(io.LimitReader(resp.RawBody(), announcementPDFMaxBytes+1))
+	if readErr != nil {
+		return nil, "", models.NewAnnouncementAIError("download_failed", "读取公告原文失败，请稍后重试", readErr)
+	}
+	if len(data) == 0 {
+		return nil, "", models.NewAnnouncementAIError("download_failed", "公告原文为空，请稍后重试", nil)
+	}
+	if len(data) > announcementPDFMaxBytes {
+		return nil, "", models.NewAnnouncementAIError("pdf_too_large", "公告 PDF 超过 30MB，暂不支持 AI 解读", nil)
+	}
+	mediaType, _, _ := mime.ParseMediaType(resp.Header().Get("Content-Type"))
+	return data, mediaType, nil
+}
+
+func isAnnouncementBotChallenge(data []byte) bool {
+	if len(data) == 0 || len(data) > announcementChallengeMaxBytes {
+		return false
+	}
+	script := strings.TrimSpace(string(data))
+	return strings.HasPrefix(script, "<script>") &&
+		strings.HasSuffix(script, "</script>") &&
+		strings.Contains(script, "__tst_status") &&
+		strings.Contains(script, "EO_Bot_Ssid") &&
+		strings.Contains(script, "document[")
+}
+
+func solveAnnouncementBotChallenge(ctx context.Context, data []byte) (cookies []*http.Cookie, err error) {
+	if !isAnnouncementBotChallenge(data) {
+		return nil, errors.New("unrecognized announcement source challenge")
+	}
+	script := strings.TrimSpace(string(data))
+	script = strings.TrimSuffix(strings.TrimPrefix(script, "<script>"), "</script>")
+
+	vm := otto.New()
+	vm.Interrupt = make(chan func(), 1)
+	done := make(chan struct{})
+	defer close(done)
+	go func() {
+		timer := time.NewTimer(announcementChallengeTimeout)
+		defer timer.Stop()
+		select {
+		case <-ctx.Done():
+			vm.Interrupt <- func() { panic(ctx.Err()) }
+		case <-timer.C:
+			vm.Interrupt <- func() { panic(errors.New("announcement source challenge timed out")) }
+		case <-done:
+		}
+	}()
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			switch value := recovered.(type) {
+			case error:
+				err = value
+			default:
+				err = fmt.Errorf("announcement source challenge failed: %v", value)
+			}
+			cookies = nil
+		}
+	}()
+
+	if _, err = vm.Run(`
+var capturedCookies = [];
+var document = {};
+Object.defineProperty(document, "cookie", {
+  set: function(value) { capturedCookies.push(value); }
+});
+function setTimeout() {}
+var location = { href: "" };
+`); err != nil {
+		return nil, err
+	}
+	if _, err = vm.Run(script); err != nil {
+		return nil, err
+	}
+	value, err := vm.Get("capturedCookies")
+	if err != nil {
+		return nil, err
+	}
+	exported, err := value.Export()
+	if err != nil {
+		return nil, err
+	}
+	captured, ok := exported.([]string)
+	if !ok {
+		return nil, errors.New("announcement source challenge returned invalid cookies")
+	}
+	expected := map[string]bool{"__tst_status": false, "EO_Bot_Ssid": false}
+	for _, raw := range captured {
+		pair := strings.TrimSpace(strings.SplitN(raw, ";", 2)[0])
+		name, value, found := strings.Cut(pair, "=")
+		if !found || expected[name] || !announcementChallengeCookieValuePattern.MatchString(value) {
+			return nil, errors.New("announcement source challenge returned invalid cookies")
+		}
+		if _, allowed := expected[name]; !allowed {
+			return nil, errors.New("announcement source challenge returned unexpected cookie")
+		}
+		expected[name] = true
+		cookies = append(cookies, &http.Cookie{Name: name, Value: value})
+	}
+	if !expected["__tst_status"] || !expected["EO_Bot_Ssid"] {
+		return nil, errors.New("announcement source challenge returned incomplete cookies")
+	}
+	return cookies, nil
 }
 
 func ExtractAnnouncementPDFText(data []byte) (string, error) {

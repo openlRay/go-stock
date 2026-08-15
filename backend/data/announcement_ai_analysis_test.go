@@ -105,6 +105,7 @@ func TestDownloadAnnouncementPDFValidation(t *testing.T) {
 		{name: "pdf", contentType: "application/pdf", body: "%PDF-1.4\nbody", status: http.StatusOK},
 		{name: "signature wins for octet stream", contentType: "application/octet-stream", body: "%PDF-1.4\nbody", status: http.StatusOK},
 		{name: "html", contentType: "text/html", body: "<html>no</html>", status: http.StatusOK, wantCode: "not_pdf"},
+		{name: "unrecognized script", contentType: "application/pdf", body: `<script>document["cookie"]="other=1";</script>`, status: http.StatusOK, wantCode: "not_pdf"},
 		{name: "bad signature", contentType: "application/pdf", body: "not pdf", status: http.StatusOK, wantCode: "not_pdf"},
 		{name: "upstream error", contentType: "text/plain", body: "error", status: http.StatusBadGateway, wantCode: "download_failed"},
 	}
@@ -128,6 +129,50 @@ func TestDownloadAnnouncementPDFValidation(t *testing.T) {
 			assert.Equal(t, tt.wantCode, safeErr.Code)
 		})
 	}
+}
+
+func TestDownloadAnnouncementPDFCompletesBotChallenge(t *testing.T) {
+	const challenge = `<script>
+var statusName = "__tst_status";
+var sessionName = "EO_Bot_Ssid";
+document["cookie"] = statusName + "=2465593332#;";
+document["cookie"] = sessionName + "=8454144;";
+</script>`
+	var requests atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		statusCookie, statusErr := r.Cookie("__tst_status")
+		sessionCookie, sessionErr := r.Cookie("EO_Bot_Ssid")
+		w.Header().Set("Content-Type", "application/pdf")
+		if statusErr != nil || sessionErr != nil {
+			_, _ = w.Write([]byte(challenge))
+			return
+		}
+		assert.Equal(t, "2465593332#", statusCookie.Value)
+		assert.Equal(t, "8454144", sessionCookie.Value)
+		_, _ = w.Write([]byte("%PDF-1.7\nbody"))
+	}))
+	defer server.Close()
+
+	body, err := downloadAnnouncementPDF(context.Background(), CreateHTTPClientWithTimeout(time.Second), server.URL)
+	require.NoError(t, err)
+	assert.Equal(t, "%PDF-1.7\nbody", string(body))
+	assert.Equal(t, int32(2), requests.Load())
+}
+
+func TestAnnouncementBotChallengeExecutionIsBounded(t *testing.T) {
+	challenge := []byte(`<script>
+var statusName = "__tst_status";
+var sessionName = "EO_Bot_Ssid";
+var cookie = document["cookie"];
+while (true) {}
+</script>`)
+	startedAt := time.Now()
+
+	_, err := solveAnnouncementBotChallenge(context.Background(), challenge)
+
+	require.Error(t, err)
+	assert.Less(t, time.Since(startedAt), 2*time.Second)
 }
 
 func TestDownloadAnnouncementPDFDoesNotFollowRedirect(t *testing.T) {

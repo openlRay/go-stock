@@ -1,4 +1,4 @@
-{"file":".trellis/spec/backend/web-runtime.md","reason":"Verify generated bindings and Web RPC exposure stay synchronized and do not relax desktop-only exclusions."}
+{"file":".trellis/spec/backend/runtime-guidelines.md","reason":"Verify generated bindings and Web RPC exposure stay synchronized and do not relax desktop-only exclusions."}
 {"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"Verify optional values, errors, events, and capability metadata round-trip through every layer and consumer."}
 {"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"Verify provider and capability logic is centralized and direct/tool/Agent request paths do not drift."}
 {"file":".trellis/tasks/08-12-ai-model-config-redesign/research/model-capability-matrix.md","reason":"Verify every exposed field matches a stable adapter mapping and unsupported fields are withheld safely."}

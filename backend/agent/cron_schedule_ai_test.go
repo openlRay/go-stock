@@ -19,6 +19,12 @@ func TestNormalizeCronSchedule(t *testing.T) {
 			wantSummary: "每 5 分钟执行一次",
 		},
 		{
+			name:        "three day interval",
+			input:       cronScheduleAIOutput{Mode: "interval", IntervalValue: 3, IntervalUnit: "day"},
+			wantCron:    "0 0 0 */3 * *",
+			wantSummary: "每 3 天执行一次",
+		},
+		{
 			name:        "daily noon",
 			input:       cronScheduleAIOutput{Mode: "daily", Time: "12:00"},
 			wantCron:    "0 0 12 * * *",
@@ -61,6 +67,7 @@ func TestNormalizeCronScheduleRejectsInvalidIntent(t *testing.T) {
 	tests := []cronScheduleAIOutput{
 		{Mode: "interval", IntervalValue: 0, IntervalUnit: "minute"},
 		{Mode: "interval", IntervalValue: 24, IntervalUnit: "hour"},
+		{Mode: "interval", IntervalValue: 32, IntervalUnit: "day"},
 		{Mode: "daily", Time: "25:00"},
 		{Mode: "weekly", Time: "09:00", Weekdays: nil},
 		{Mode: "weekly", Time: "09:00", Weekdays: []int{7}},

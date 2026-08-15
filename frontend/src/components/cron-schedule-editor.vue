@@ -1,18 +1,11 @@
 <template>
-  <n-modal
+  <AppModalShell
     :show="show"
-    :mask-closable="false"
-    transform-origin="center"
+    title="执行时间设置"
+    aria-label="执行时间设置"
     @update:show="handleShowChange"
   >
-    <section class="schedule-dialog" role="dialog" aria-modal="true" aria-label="执行时间设置">
-      <header class="schedule-dialog__header">
-        <h2>执行时间设置</h2>
-        <button class="schedule-dialog__close" type="button" aria-label="关闭" @click="handleShowChange(false)">×</button>
-      </header>
-
-      <main class="schedule-dialog__body">
-        <section class="ai-panel">
+    <section class="ai-panel">
           <div class="ai-panel__title">✨ AI 帮你填写</div>
           <p class="ai-panel__description">可选能力：描述执行时间，AI 只填充下方表单，不会直接保存。</p>
           <div class="ai-panel__input-row">
@@ -46,9 +39,9 @@
           <p v-if="!hasAIConfig" class="ai-panel__warning">
             请先在“AI 模型服务配置”中添加并设置默认模型；手动设置和专家 Cron 仍可使用。
           </p>
-        </section>
+    </section>
 
-        <section class="manual-panel">
+    <section class="manual-panel">
           <h3>手动设置</h3>
           <p>直接修改任何字段，始终以这里的内容为准。</p>
 
@@ -74,7 +67,7 @@
                 <n-input-number
                   v-model:value="schedule.interval.value"
                   :min="1"
-                  :max="schedule.interval.unit === 'minute' ? 59 : 23"
+                  :max="intervalMax"
                   :show-button="false"
                   class="field-number"
                 />
@@ -96,7 +89,6 @@
                   v-model:formatted-value="schedule.daily.time"
                   format="HH:mm"
                   value-format="HH:mm"
-                  :seconds="[]"
                   :clearable="false"
                   class="field-time"
                 />
@@ -110,7 +102,7 @@
                 <div class="schedule-form__content">
                   <n-checkbox-group v-model:value="schedule.weekly.days">
                     <n-space :size="8" wrap>
-                      <n-checkbox-button
+                      <n-checkbox
                         v-for="day in weekdayOptions"
                         :key="day.value"
                         :value="day.value"
@@ -128,7 +120,6 @@
                     v-model:formatted-value="schedule.weekly.time"
                     format="HH:mm"
                     value-format="HH:mm"
-                    :seconds="[]"
                     :clearable="false"
                     class="field-time"
                   />
@@ -160,7 +151,6 @@
                     v-model:formatted-value="schedule.monthly.time"
                     format="HH:mm"
                     value-format="HH:mm"
-                    :seconds="[]"
                     :clearable="false"
                     class="field-time"
                   />
@@ -195,9 +185,9 @@
               </span>
             </div>
           </section>
-        </section>
+    </section>
 
-        <details class="expert-panel">
+    <details class="expert-panel">
           <summary>专家设置：查看或直接编辑 Cron 表达式</summary>
           <div class="expert-panel__content">
             <div class="expert-panel__input-row">
@@ -227,10 +217,9 @@
               <p>普通设置固定“秒”为 0。合法但无法转换为普通表单的表达式会作为自定义 Cron 原样保留。</p>
             </div>
           </div>
-        </details>
-      </main>
+    </details>
 
-      <footer class="schedule-dialog__footer">
+    <template #footer>
         <n-button class="footer-button footer-button--cancel" @click="handleShowChange(false)">取消</n-button>
         <n-button
           class="footer-button footer-button--primary"
@@ -240,14 +229,14 @@
         >
           使用此设置
         </n-button>
-      </footer>
-    </section>
-  </n-modal>
+    </template>
+  </AppModalShell>
 </template>
 
 <script setup>
 import { computed, reactive, ref, watch } from 'vue'
 import { useMessage } from 'naive-ui'
+import AppModalShell from './common/AppModalShell.vue'
 import {
   CalculateNextRunTimes,
   ParseCronScheduleText,
@@ -270,10 +259,15 @@ const modeOptions = [
   { label: '每周', value: 'weekly' },
   { label: '每月', value: 'monthly' }
 ]
-const intervalUnitOptions = [
-  { label: '分钟', value: 'minute' },
-  { label: '小时', value: 'hour' }
-]
+const intervalUnitMeta = {
+  minute: { label: '分钟', max: 59 },
+  hour: { label: '小时', max: 23 },
+  day: { label: '天', max: 31 }
+}
+const intervalUnitOptions = Object.entries(intervalUnitMeta).map(([value, meta]) => ({
+  label: meta.label,
+  value
+}))
 const weekdayOptions = [
   { label: '一', value: 1 },
   { label: '二', value: 2 },
@@ -305,17 +299,18 @@ let previewRequestID = 0
 let expertValidationRequestID = 0
 
 const hasAIConfig = computed(() => props.aiConfigOptions.length > 0)
+const intervalMax = computed(() => intervalUnitMeta[schedule.interval.unit]?.max || intervalUnitMeta.minute.max)
 const intervalValue = computed(() => {
-  const max = schedule.interval.unit === 'hour' ? 23 : 59
-  return Math.min(max, Math.max(1, Number(schedule.interval.value) || 1))
+  return Math.min(intervalMax.value, Math.max(1, Number(schedule.interval.value) || 1))
 })
 const monthDay = computed(() => Math.min(31, Math.max(1, Number(schedule.monthly.day) || 1)))
 
 const commonCron = computed(() => {
   if (schedule.mode === 'interval') {
-    return schedule.interval.unit === 'hour'
-      ? `0 0 */${intervalValue.value} * * *`
-      : `0 */${intervalValue.value} * * * *`
+    // “每 N 天”按月内日期步进，在跨月后重新计算；它不是严格的 N×24 小时间隔。
+    if (schedule.interval.unit === 'day') return `0 0 0 */${intervalValue.value} * *`
+    if (schedule.interval.unit === 'hour') return `0 0 */${intervalValue.value} * * *`
+    return `0 */${intervalValue.value} * * * *`
   }
   if (schedule.mode === 'daily') {
     const [hour, minute] = splitTime(schedule.daily.time)
@@ -332,7 +327,7 @@ const commonCron = computed(() => {
 const workingCron = computed(() => customCron.value ? customCronValue.value.trim() : commonCron.value)
 const scheduleSummary = computed(() => {
   if (schedule.mode === 'interval') {
-    return `每 ${intervalValue.value} ${schedule.interval.unit === 'hour' ? '小时' : '分钟'}执行一次`
+    return `每 ${intervalValue.value} ${intervalUnitMeta[schedule.interval.unit]?.label || '分钟'}执行一次`
   }
   if (schedule.mode === 'daily') return `每天 ${normalizeTime(schedule.daily.time)} 执行一次`
   if (schedule.mode === 'weekly') {
@@ -426,6 +421,17 @@ function applyCommonCron(raw) {
     schedule.mode = 'interval'
     schedule.interval.value = value
     schedule.interval.unit = 'hour'
+    customCron.value = false
+    return true
+  }
+  match = day.match(/^\*\/(\d+)$/)
+  // 只把当前编辑器能够无损表达的 00:00 月内日期步进规则回填为“每 N 天”。
+  if (minute === '0' && hour === '0' && match && week === '*') {
+    const value = Number(match[1])
+    if (value < 1 || value > 31) return false
+    schedule.mode = 'interval'
+    schedule.interval.value = value
+    schedule.interval.unit = 'day'
     customCron.value = false
     return true
   }
@@ -557,8 +563,8 @@ function applyAIResult(result) {
   if (mode === 'interval') {
     const unit = result.intervalUnit
     const value = Number(result.intervalValue)
-    const max = unit === 'hour' ? 23 : 59
-    if (!['minute', 'hour'].includes(unit) || value < 1 || value > max) throw new Error('AI 返回的执行间隔无效')
+    const unitMeta = intervalUnitMeta[unit]
+    if (!unitMeta || value < 1 || value > unitMeta.max) throw new Error('AI 返回的执行间隔无效')
   } else if (mode === 'daily') {
     if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(result.time || '')) throw new Error('AI 返回的执行时间无效')
   } else if (mode === 'weekly') {
@@ -608,58 +614,6 @@ function confirmSchedule() {
 </script>
 
 <style scoped>
-.schedule-dialog {
-  width: min(760px, calc(100vw - 32px));
-  max-height: min(920px, calc(100vh - 32px));
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  color: #202733;
-  background: #fff;
-  border: 1px solid #dde4ec;
-  border-radius: 18px;
-  box-shadow: 0 24px 70px rgb(15 23 42 / 22%);
-  font-size: 14px;
-  text-align: left;
-}
-
-.schedule-dialog__header {
-  min-height: 68px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 24px;
-  border-bottom: 1px solid #e2e7ee;
-}
-
-.schedule-dialog__header h2 {
-  margin: 0;
-  font-size: 18px;
-  font-weight: 700;
-  letter-spacing: .01em;
-}
-
-.schedule-dialog__close {
-  width: 34px;
-  height: 34px;
-  padding: 0;
-  color: #697381;
-  background: transparent;
-  border: 0;
-  border-radius: 9px;
-  font: 300 32px/30px Arial, sans-serif;
-  cursor: pointer;
-}
-
-.schedule-dialog__close:hover { background: #f3f5f7; }
-
-.schedule-dialog__body {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 16px 24px 0;
-}
-
 .ai-panel {
   padding: 14px 16px;
   background: #f1faf6;
@@ -781,17 +735,6 @@ function confirmSchedule() {
 .expert-panel__symbols, .expert-panel__examples { display: flex; flex-wrap: wrap; gap: 8px 18px; margin-top: 8px; }
 .expert-panel__help p { margin: 9px 0 0; }
 
-.schedule-dialog__footer {
-  min-height: 72px;
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 10px;
-  padding: 0 24px;
-  background: #fff;
-  border-top: 1px solid #e2e7ee;
-}
-
 .footer-button { min-width: 76px; }
 .footer-button--primary { min-width: 110px; }
 
@@ -808,9 +751,6 @@ function confirmSchedule() {
 :deep(.footer-button--primary.n-button) { font-weight: 650; }
 
 @media (max-width: 640px) {
-  .schedule-dialog { width: calc(100vw - 20px); max-height: calc(100vh - 20px); border-radius: 14px; }
-  .schedule-dialog__header, .schedule-dialog__footer { padding-left: 16px; padding-right: 16px; }
-  .schedule-dialog__body { padding: 16px 16px 0; }
   .ai-panel__input-row { flex-direction: column; }
   .ai-panel__submit { width: 100%; flex-basis: auto; }
   .mode-segment button { padding: 0 4px; font-size: 13px; }

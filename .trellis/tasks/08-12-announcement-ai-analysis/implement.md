@@ -30,7 +30,7 @@ Rollback point: the additive model/service can be removed before UI wiring witho
 
 - [ ] Promote `github.com/ledongthuc/pdf` to a direct dependency at the existing checked version.
 - [ ] Add strict `artCode` validation and canonical fixed-host URL construction.
-- [ ] Download with request context, timeout, no retry, status/type/signature validation, and a maximum byte limit.
+- [ ] Download with request context, timeout, no automatic retry, status/type/signature validation, and a maximum byte limit; permit only one strictly recognized, time-bounded Eastmoney cookie challenge handshake to the same fixed URL.
 - [ ] Extract plain text in memory and normalize it without collapsing useful paragraph/table separation.
 - [ ] Return stable errors for invalid ID, HTTP failure, oversized/non-PDF body, parse error, and scanned/empty text.
 - [ ] Add deterministic unit tests with `httptest` and local PDF fixtures; keep live endpoint tests optional/integration-only.
@@ -136,4 +136,3 @@ git diff --check
 - Do not save partial/cancelled/failed output or delete the prior successful result before replacement succeeds.
 - Do not hand-edit only one side of generated Wails bindings; regenerate and validate the Web binding allowlist.
 - Stage only files produced by this task.
-

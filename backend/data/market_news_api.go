@@ -29,11 +29,62 @@ import (
 // -----------------------------------------------------------------------------------
 type MarketNewsApi struct {
 }
+/** 财联社电报URL前缀 */
+const (
+	clsTelegraphDetailURLPrefix = "https://www.cls.cn/detail/"
+	clsTelegraphLegacyURLPrefix = "https://www.cls.cn/telegraph/"
+)
 
 func NewMarketNewsApi() *MarketNewsApi {
 	return &MarketNewsApi{}
 }
+/** 
+获取财联社电报URL
+@param news map[string]any
+@return string
+*/
+func clsTelegraphURL(news map[string]any) string {
+	if shareURL, ok := news["shareurl"].(string); ok && shareURL != "" {
+		return normalizeClsTelegraphURL(shareURL)
+	}
 
+	id, err := convertor.ToInt(news["id"])
+	if err != nil {
+		return ""
+	}
+	return clsTelegraphDetailURLPrefix + strconv.FormatInt(id, 10)
+}
+/** 
+规范化财联社电报URL
+@param rawURL string
+@return string
+*/
+func normalizeClsTelegraphURL(rawURL string) string {
+	var id string
+	switch {
+	case strings.HasPrefix(rawURL, clsTelegraphDetailURLPrefix):
+		id = strings.TrimPrefix(rawURL, clsTelegraphDetailURLPrefix)
+	case strings.HasPrefix(rawURL, clsTelegraphLegacyURLPrefix):
+		id = strings.TrimPrefix(rawURL, clsTelegraphLegacyURLPrefix)
+	default:
+		return rawURL
+	}
+
+	if strings.ContainsAny(id, "eE") {
+		numericID, err := strconv.ParseFloat(id, 64)
+		if err != nil {
+			return rawURL
+		}
+		id = strconv.FormatFloat(numericID, 'f', -1, 64)
+	}
+	return clsTelegraphDetailURLPrefix + id
+}
+
+/** 
+获取财联社电报列表
+@param crawlTimeOut int64
+@return *[]models.Telegraph
+*/
 func (m MarketNewsApi) TelegraphList(crawlTimeOut int64) *[]models.Telegraph {
 	//https://www.cls.cn/api/cache?app=CailianpressWeb&name=telegraph&os=web&sv=8.7.9
 	clsURL := "https://www.cls.cn/api/cache?app=CailianpressWeb&name=telegraph&os=web&sv=8.7.9"
@@ -65,12 +116,7 @@ func (m MarketNewsApi) TelegraphList(crawlTimeOut int64) *[]models.Telegraph {
 			ctime, _ := convertor.ToInt(news["ctime"])
 			dataTime := time.Unix(ctime, 0).Local()
 
-			shareURL := ""
-			if su, ok2 := news["shareurl"].(string); ok2 && su != "" {
-				shareURL = su
-			} else if id, ok2 := news["id"]; ok2 {
-				shareURL = fmt.Sprintf("https://www.cls.cn/telegraph/%v", id)
-			}
+			shareURL := clsTelegraphURL(news)
 
 			title, _ := news["title"].(string)
 			content, _ := news["content"].(string)
@@ -131,6 +177,11 @@ func (m MarketNewsApi) TelegraphList(crawlTimeOut int64) *[]models.Telegraph {
 	return &telegraphs
 }
 
+/** 
+获取新的财联社电报列表
+@param crawlTimeOut int64
+@return *[]models.Telegraph
+*/
 func (m MarketNewsApi) GetNewTelegraph(crawlTimeOut int64) *[]models.Telegraph {
 	clsURL := "https://www.cls.cn/api/cache?app=CailianpressWeb&name=telegraphList&os=web&sv=8.7.9"
 	res := map[string]any{}
@@ -161,12 +212,7 @@ func (m MarketNewsApi) GetNewTelegraph(crawlTimeOut int64) *[]models.Telegraph {
 			ctime, _ := convertor.ToInt(news["ctime"])
 			dataTime := time.Unix(ctime, 0).Local()
 
-			shareURL := ""
-			if su, ok2 := news["shareurl"].(string); ok2 && su != "" {
-				shareURL = su
-			} else if id, ok2 := news["id"]; ok2 {
-				shareURL = fmt.Sprintf("https://www.cls.cn/telegraph/%v", id)
-			}
+			shareURL := clsTelegraphURL(news)
 
 			title, _ := news["title"].(string)
 			content, _ := news["content"].(string)
@@ -223,6 +269,12 @@ func (m MarketNewsApi) GetNewTelegraph(crawlTimeOut int64) *[]models.Telegraph {
 	}
 	return &telegraphs
 }
+/** 
+获取财联社电报列表
+@param source string
+@param limit int
+@return *[]*models.Telegraph
+*/
 func (m MarketNewsApi) GetNewsList(source string, limit int) *[]*models.Telegraph {
 	news := &[]*models.Telegraph{}
 	if source != "" {
@@ -231,6 +283,7 @@ func (m MarketNewsApi) GetNewsList(source string, limit int) *[]*models.Telegrap
 		db.Dao.Model(news).Preload("TelegraphTags").Order("data_time desc,time desc").Limit(limit).Find(news)
 	}
 	for _, item := range *news {
+		item.Url = normalizeClsTelegraphURL(item.Url)
 		tags := &[]models.Tags{}
 		db.Dao.Model(&models.Tags{}).Where("id in ?", lo.Map(item.TelegraphTags, func(item models.TelegraphTags, index int) uint {
 			return item.TagId
@@ -252,6 +305,7 @@ func (m MarketNewsApi) GetNewsList2(source string, limit int) *[]*models.Telegra
 		db.Dao.Model(news).Preload("TelegraphTags").Order("data_time desc,is_red desc").Limit(limit).Find(news)
 	}
 	for _, item := range *news {
+		item.Url = normalizeClsTelegraphURL(item.Url)
 		tags := &[]models.Tags{}
 		db.Dao.Model(&models.Tags{}).Where("id in ?", lo.Map(item.TelegraphTags, func(item models.TelegraphTags, index int) uint {
 			return item.TagId
@@ -273,6 +327,7 @@ func (m MarketNewsApi) GetTelegraphList(source string) *[]*models.Telegraph {
 		db.Dao.Model(news).Preload("TelegraphTags").Order("data_time desc,time desc").Limit(50).Find(news)
 	}
 	for _, item := range *news {
+		item.Url = normalizeClsTelegraphURL(item.Url)
 		tags := &[]models.Tags{}
 		db.Dao.Model(&models.Tags{}).Where("id in ?", lo.Map(item.TelegraphTags, func(item models.TelegraphTags, index int) uint {
 			return item.TagId
@@ -296,6 +351,7 @@ func (m MarketNewsApi) GetTelegraphListWithPaging(source string, page, pageSize 
 		db.Dao.Model(news).Preload("TelegraphTags").Order("data_time desc,time desc").Limit(pageSize).Offset(offset).Find(news)
 	}
 	for _, item := range *news {
+		item.Url = normalizeClsTelegraphURL(item.Url)
 		tags := &[]models.Tags{}
 		db.Dao.Model(&models.Tags{}).Where("id in ?", lo.Map(item.TelegraphTags, func(item models.TelegraphTags, index int) uint {
 			return item.TagId

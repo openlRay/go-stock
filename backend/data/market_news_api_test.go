@@ -303,6 +303,76 @@ func TestTelegraphList(t *testing.T) {
 	NewMarketNewsApi().TelegraphList(30)
 }
 
+func TestClsTelegraphURL(t *testing.T) {
+	tests := []struct {
+		name string
+		news map[string]any
+		want string
+	}{
+		{
+			name: "数字 ID 使用十进制格式",
+			news: map[string]any{"id": float64(2451506)},
+			want: "https://www.cls.cn/detail/2451506",
+		},
+		{
+			name: "优先使用接口原始链接",
+			news: map[string]any{
+				"id":       float64(2451506),
+				"shareurl": "https://www.cls.cn/detail/2451506",
+			},
+			want: "https://www.cls.cn/detail/2451506",
+		},
+		{
+			name: "转换接口返回的历史链接",
+			news: map[string]any{
+				"id":       float64(2451497),
+				"shareurl": "https://www.cls.cn/telegraph/2451497",
+			},
+			want: "https://www.cls.cn/detail/2451497",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := clsTelegraphURL(tt.news); got != tt.want {
+				t.Fatalf("clsTelegraphURL() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNormalizeClsTelegraphURL(t *testing.T) {
+	tests := []struct {
+		name   string
+		rawURL string
+		want   string
+	}{
+		{
+			name:   "转换历史科学计数法链接",
+			rawURL: "https://www.cls.cn/telegraph/2.451506e+06",
+			want:   "https://www.cls.cn/detail/2451506",
+		},
+		{
+			name:   "转换历史十进制链接",
+			rawURL: "https://www.cls.cn/telegraph/2451497",
+			want:   "https://www.cls.cn/detail/2451497",
+		},
+		{
+			name:   "保留正确详情链接",
+			rawURL: "https://www.cls.cn/detail/2451497",
+			want:   "https://www.cls.cn/detail/2451497",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := normalizeClsTelegraphURL(tt.rawURL); got != tt.want {
+				t.Fatalf("normalizeClsTelegraphURL() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestProxy(t *testing.T) {
 	response, err := resty.New().
 		SetProxy("http://go-stock:778d4ff2-73f3-4d56-b3c3-d9a730a06ae3@stock.sparkmemory.top:8888").

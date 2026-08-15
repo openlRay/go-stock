@@ -1,3 +1,4 @@
-{"file":".trellis/spec/backend/web-runtime.md","reason":"检查项目适配矩阵没有遗漏当前 fork 的 Web/桌面关键契约。"}
+{"file":".trellis/spec/backend/runtime-guidelines.md","reason":"检查项目适配矩阵没有遗漏当前 fork 的 Web/桌面运行时契约。"}
+{"file":".trellis/spec/backend/deployment-guidelines.md","reason":"检查项目适配矩阵没有遗漏当前 fork 的 Docker 与持久化契约。"}
 {"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"检查技能说明覆盖普通 merge 后跨层语义审查。"}
 {"file":".trellis/tasks/08-10-upstream-sync-skill/research-baseline.md","reason":"确认精简技能仍禁止基线中暴露的危险自动操作。"}

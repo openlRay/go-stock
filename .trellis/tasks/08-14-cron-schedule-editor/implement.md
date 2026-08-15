@@ -6,8 +6,11 @@
 4. 替换 `cron-task-manager.vue` 中旧配置器，保留既有 AI 配置监听修改。
 5. 重新生成或手工同步 Wails 绑定，并验证 Web RPC 可发现新方法。
 6. 运行 Go 测试、前端构建和定时任务相关检查。
-7. 按确认设计稿收敛弹窗视觉，并通过本地浏览器截图核验。
+7. 抽离通用 `AppModalShell`，按确认设计稿收敛弹窗视觉；存在真实交互风险时复用本地外部浏览器核验。
 8. 新增全局默认模型的持久化、切换 RPC、列表交互与默认解析，并移除定时设置中的模型选择。
+9. 为间隔执行增加 `day` 单位，保持前后端校验、Cron 生成、摘要和专家回填一致。
+10. 将跨组件适用的架构、弹框和质量规则写入 frontend spec；组件 API、Cron 字段、校验矩阵和本次 UI 修复细节只保留在本 task 的 `design.md`。
+11. 将复用本地外部浏览器和按风险选择测试范围的工作方式写入根 `AGENTS.md`。
 
 ## Validation
 
@@ -15,6 +18,8 @@
 go test ./backend/agent ./...
 pnpm --dir frontend build
 ```
+
+需要交互与视觉回归时，只复用电脑上的本地外部浏览器，不使用 Codex in-app Browser 或 `playwright-cli`；小改动不强制自动化测试。
 
 ## Risk / Rollback
 
