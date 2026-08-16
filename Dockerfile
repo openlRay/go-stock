@@ -62,7 +62,7 @@ RUN sed -i "s|http://deb.debian.org|${DEBIAN_MIRROR}|g" /etc/apt/sources.list.d/
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 10001 go-stock \
     && useradd --uid 10001 --gid go-stock --create-home --home-dir /home/go-stock go-stock \
-    && install -d -o go-stock -g go-stock /app/data /app/logs /app/skills
+    && install -d -o go-stock -g go-stock /app/data /app/logs /app/memory /app/skills
 
 WORKDIR /app
 

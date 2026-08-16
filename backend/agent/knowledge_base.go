@@ -659,6 +659,16 @@ func AddDocumentToKB(kbName, content, source string, extraMetadata map[string]st
 //
 // 文件大小限制：10MB（避免一次入库超大文件导致内存暴涨）
 func AddFileToKB(kbName, filePath string) ([]string, error) {
+	return addFileToKB(kbName, filePath, true)
+}
+
+// AddUploadedFileToKB 解析 Web 上传的临时文件并入库。
+// 与 AddFileToKB 不同，本函数不会把服务器临时路径写入文档元数据。
+func AddUploadedFileToKB(kbName, filePath string) ([]string, error) {
+	return addFileToKB(kbName, filePath, false)
+}
+
+func addFileToKB(kbName, filePath string, includeFilePath bool) ([]string, error) {
 	kbName = strings.TrimSpace(kbName)
 	filePath = strings.TrimSpace(filePath)
 	if kbName == "" || filePath == "" {
@@ -697,10 +707,16 @@ func AddFileToKB(kbName, filePath string) ([]string, error) {
 	}
 
 	source := filepath.Base(filePath)
-	return AddDocumentToKB(kbName, content, source, map[string]string{
-		"file_path": filePath,
-		"file_size": fmt.Sprintf("%d", info.Size()),
-	})
+	metadata := buildKBFileMetadata(filePath, info.Size(), includeFilePath)
+	return AddDocumentToKB(kbName, content, source, metadata)
+}
+
+func buildKBFileMetadata(filePath string, fileSize int64, includeFilePath bool) map[string]string {
+	metadata := map[string]string{"file_size": fmt.Sprintf("%d", fileSize)}
+	if includeFilePath {
+		metadata["file_path"] = filePath
+	}
+	return metadata
 }
 
 // KBFileImportResult 单个文件的导入结果（用于批量导入返回）
@@ -731,6 +747,17 @@ type KBBatchImportSummary struct {
 // 返回每个文件的导入结果 + 汇总统计。
 // 注意：本函数同步执行，若需后台处理请用 StartBatchImport（goroutine 包装）。
 func AddFilesToKB(kbName string, filePaths []string) (*KBBatchImportSummary, error) {
+	return addFilesToKB(kbName, filePaths, AddFileToKB, true)
+}
+
+// AddUploadedFilesToKB 批量导入 Web 上传的临时文件，不向状态或文档元数据暴露临时路径。
+func AddUploadedFilesToKB(kbName string, filePaths []string) (*KBBatchImportSummary, error) {
+	return addFilesToKB(kbName, filePaths, AddUploadedFileToKB, false)
+}
+
+type kbFileImporter func(kbName, filePath string) ([]string, error)
+
+func addFilesToKB(kbName string, filePaths []string, importer kbFileImporter, includeFilePath bool) (*KBBatchImportSummary, error) {
 	kbName = strings.TrimSpace(kbName)
 	if kbName == "" {
 		return nil, fmt.Errorf("知识库名称不能为空")
@@ -765,14 +792,18 @@ func AddFilesToKB(kbName string, filePaths []string) (*KBBatchImportSummary, err
 			fileSem <- struct{}{}
 			defer func() { <-fileSem }()
 
-			result := KBFileImportResult{
-				FilePath: filePath,
-				FileName: filepath.Base(filePath),
+			result := KBFileImportResult{FileName: filepath.Base(filePath)}
+			if includeFilePath {
+				result.FilePath = filePath
 			}
-			docIDs, err := AddFileToKB(kbName, filePath)
+			docIDs, err := importer(kbName, filePath)
 			if err != nil {
 				result.Success = false
 				result.Error = err.Error()
+				if !includeFilePath {
+					// Web 上传状态会直接返回给浏览器，只保留文件名，避免错误链泄露服务器临时目录。
+					result.Error = strings.ReplaceAll(result.Error, filePath, result.FileName)
+				}
 				result.DocIDs = docIDs
 				result.ChunkCount = len(docIDs)
 			} else {
@@ -807,6 +838,30 @@ func AddFilesToKB(kbName string, filePaths []string) (*KBBatchImportSummary, err
 	return summary, nil
 }
 
+type kbBatchImportRunner func(kbName string, filePaths []string) (*KBBatchImportSummary, error)
+
+// launchBatchImport 启动已通过前置校验的后台导入。
+// cleanup 由后台任务持有，确保 Web 上传的临时文件在读取完成、失败或 panic 后才释放。
+func launchBatchImport(kbName string, filePaths []string, cleanup func(), runner kbBatchImportRunner) {
+	go func() {
+		if cleanup != nil {
+			defer cleanup()
+		}
+		defer func() {
+			if r := recover(); r != nil {
+				logger.SugaredLogger.Errorf("StartBatchImport panic: kb=%q err=%v", kbName, r)
+				// panic 详情只写服务端日志，轮询状态使用稳定文案，避免泄露临时路径等内部信息。
+				finishKBVectorizing(kbName, nil, "内部错误")
+			}
+		}()
+		_, err := runner(kbName, filePaths)
+		if err != nil {
+			finishKBVectorizing(kbName, nil, err.Error())
+			logger.SugaredLogger.Warnf("StartBatchImport 失败: kb=%q err=%v", kbName, err)
+		}
+	}()
+}
+
 // StartBatchImport 异步启动批量导入（goroutine 后台处理，立即返回）。
 //
 // 与 AddFilesToKB 的区别：本函数不阻塞，立即返回 nil；导入在后台 goroutine 中执行，
@@ -815,6 +870,16 @@ func AddFilesToKB(kbName string, filePaths []string) (*KBBatchImportSummary, err
 // 用于"导入后可关闭抽屉，后台继续处理"场景。
 // 若该 KB 已在向量化中则返回错误，避免并发写冲突。
 func StartBatchImport(kbName string, filePaths []string) error {
+	return startBatchImport(kbName, filePaths, nil, AddFilesToKB)
+}
+
+// StartBatchImportWithCleanup 启动批量导入，并在后台任务真正结束后调用 cleanup。
+// 用于 Web multipart 上传等临时文件由后台 goroutine 持续读取的场景。
+func StartBatchImportWithCleanup(kbName string, filePaths []string, cleanup func()) error {
+	return startBatchImport(kbName, filePaths, cleanup, AddUploadedFilesToKB)
+}
+
+func startBatchImport(kbName string, filePaths []string, cleanup func(), runner kbBatchImportRunner) error {
 	kbName = strings.TrimSpace(kbName)
 	if kbName == "" {
 		return fmt.Errorf("知识库名称不能为空")
@@ -837,20 +902,7 @@ func StartBatchImport(kbName string, filePaths []string) error {
 
 	// 在 goroutine 启动前就设置进行中状态，确保 StartBatchImport 返回后前端轮询立即可见
 	setKBVectorizing(kbName, len(filePaths))
-
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				logger.SugaredLogger.Errorf("StartBatchImport panic: kb=%q err=%v", kbName, r)
-				finishKBVectorizing(kbName, nil, fmt.Sprintf("内部错误: %v", r))
-			}
-		}()
-		_, err := AddFilesToKB(kbName, filePaths)
-		if err != nil {
-			finishKBVectorizing(kbName, nil, err.Error())
-			logger.SugaredLogger.Warnf("StartBatchImport 失败: kb=%q err=%v", kbName, err)
-		}
-	}()
+	launchBatchImport(kbName, filePaths, cleanup, runner)
 
 	logger.SugaredLogger.Infof("已启动后台批量导入: kb=%q files=%d", kbName, len(filePaths))
 	return nil

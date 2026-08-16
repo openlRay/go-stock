@@ -1,4 +1,7 @@
 const listeners = new Map()
+const selectedWebFiles = new Map()
+const selectedWebFileTokensBySignature = new Map()
+let selectedWebFileSequence = 0
 
 function dispatchEvent(name, data = []) {
   const entries = listeners.get(name)
@@ -66,15 +69,61 @@ function decodeBase64(value) {
   return bytes
 }
 
-function selectFile(accept) {
+function selectFiles(accept, multiple = false) {
   return new Promise(resolve => {
     const input = document.createElement('input')
     input.type = 'file'
     input.accept = accept
-    input.onchange = () => resolve(input.files?.[0] || null)
-    input.oncancel = () => resolve(null)
+    input.multiple = multiple
+    input.onchange = () => resolve(Array.from(input.files || []))
+    input.oncancel = () => resolve([])
     input.click()
   })
+}
+
+async function selectFile(accept) {
+  const files = await selectFiles(accept)
+  return files[0] || null
+}
+
+function registerWebFile(file) {
+  const signature = `${file.name}\u0000${file.size}\u0000${file.lastModified}`
+  const existingToken = selectedWebFileTokensBySignature.get(signature)
+  if (existingToken && selectedWebFiles.has(existingToken)) return existingToken
+
+  selectedWebFileSequence += 1
+  const safeName = String(file.name || 'file').replace(/[\\/]/g, '_')
+  const token = `web-upload://${Date.now().toString(36)}-${selectedWebFileSequence}/${safeName}`
+  selectedWebFiles.set(token, {file, signature})
+  selectedWebFileTokensBySignature.set(signature, token)
+  return token
+}
+
+function resolveWebFiles(tokens) {
+  const normalizedTokens = Array.isArray(tokens) ? tokens : [tokens]
+  return normalizedTokens.map(token => {
+    const entry = selectedWebFiles.get(token)
+    if (!entry) throw new Error('浏览器文件选择已失效，请重新选择文件')
+    return {token, ...entry}
+  })
+}
+
+function consumeWebFiles(entries) {
+  for (const entry of entries) {
+    selectedWebFiles.delete(entry.token)
+    if (selectedWebFileTokensBySignature.get(entry.signature) === entry.token) {
+      selectedWebFileTokensBySignature.delete(entry.signature)
+    }
+  }
+}
+
+async function uploadWebForm(path, formData, fallbackMessage) {
+  const response = await fetch(path, {method: 'POST', body: formData})
+  const payload = await response.json().catch(() => ({error: `HTTP ${response.status}`}))
+  if (!response.ok || payload.error) {
+    throw new Error(payload.error || fallbackMessage)
+  }
+  return payload.result
 }
 
 function installRuntime() {
@@ -184,12 +233,43 @@ function installAppProxy() {
       if (!file) return '未选择文件'
       const formData = new FormData()
       formData.append('file', file, file.name)
-      const response = await fetch('/api/skills/import', {method: 'POST', body: formData})
-      const payload = await response.json().catch(() => ({error: `HTTP ${response.status}`}))
-      if (!response.ok || payload.error) {
-        throw new Error(payload.error || '导入技能包失败')
+      return uploadWebForm('/api/skills/import', formData, '导入技能包失败')
+    },
+    async ImportTradingRecordsFromExcel() {
+      const file = await selectFile('.xls,.xlsx,.txt,.csv,text/plain,text/csv')
+      if (!file) return null
+      const formData = new FormData()
+      formData.append('file', file, file.name)
+      return uploadWebForm('/api/trading-records/import', formData, '导入交易记录失败')
+    },
+    async PickKBFilePath() {
+      const file = await selectFile('.txt,.md,.markdown,text/plain,text/markdown')
+      return file ? registerWebFile(file) : ''
+    },
+    async PickKBFilePaths() {
+      const files = await selectFiles('.txt,.md,.markdown,text/plain,text/markdown', true)
+      return files.map(registerWebFile)
+    },
+    async UploadKBFile(kbName, token) {
+      const entries = resolveWebFiles(token)
+      const formData = new FormData()
+      formData.append('kbName', kbName)
+      formData.append('file', entries[0].file, entries[0].file.name)
+      const result = await uploadWebForm('/api/knowledge-base/file/import', formData, '导入知识库文件失败')
+      consumeWebFiles(entries)
+      return result
+    },
+    async UploadKBFiles(kbName, tokens) {
+      const entries = resolveWebFiles(tokens)
+      if (entries.length === 0) throw new Error('请选择知识库文件')
+      const formData = new FormData()
+      formData.append('kbName', kbName)
+      for (const entry of entries) {
+        formData.append('files', entry.file, entry.file.name)
       }
-      return payload.result
+      const result = await uploadWebForm('/api/knowledge-base/files/import', formData, '启动知识库文件导入失败')
+      consumeWebFiles(entries)
+      return result
     },
     async SaveAsMarkdown(stockCode, stockName) {
       const result = await callRPC('GetAIResponseResult', [stockCode])

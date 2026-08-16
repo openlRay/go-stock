@@ -6,6 +6,8 @@ import (
 	"archive/zip"
 	"bytes"
 	"encoding/json"
+	"errors"
+	"go-stock/backend/data"
 	"go-stock/backend/models"
 	"mime/multipart"
 	"net/http"
@@ -17,6 +19,38 @@ import (
 	"testing"
 	"time"
 )
+
+type webTestUploadFile struct {
+	fieldName string
+	fileName  string
+	content   []byte
+}
+
+func newWebMultipartRequest(t *testing.T, path string, values map[string]string, files []webTestUploadFile) *http.Request {
+	t.Helper()
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	for name, value := range values {
+		if err := writer.WriteField(name, value); err != nil {
+			t.Fatalf("WriteField(%s) error = %v", name, err)
+		}
+	}
+	for _, upload := range files {
+		part, err := writer.CreateFormFile(upload.fieldName, upload.fileName)
+		if err != nil {
+			t.Fatalf("CreateFormFile(%s) error = %v", upload.fileName, err)
+		}
+		if _, err := part.Write(upload.content); err != nil {
+			t.Fatalf("Write(%s) error = %v", upload.fileName, err)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("multipart writer close error = %v", err)
+	}
+	req := httptest.NewRequest(http.MethodPost, path, &body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	return req
+}
 
 func (*App) PanicForWebTest() {
 	panic("test panic")
@@ -364,6 +398,245 @@ func TestWebImportSkill(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join("skills", "demo", "SKILL.md")); err != nil {
 		t.Fatalf("imported SKILL.md not found: %v", err)
+	}
+}
+
+func TestWebImportTradingRecordFile(t *testing.T) {
+	var uploadedPath string
+	api := &webAPI{
+		importTradingRecords: func(filePath string) (*data.TradingRecordImportResult, error) {
+			uploadedPath = filePath
+			content, err := os.ReadFile(filePath)
+			if err != nil {
+				t.Fatalf("os.ReadFile() error = %v", err)
+			}
+			if string(content) != "成交日期\t证券代码\n" {
+				t.Fatalf("uploaded content = %q", content)
+			}
+			return &data.TradingRecordImportResult{Total: 1, Imported: 1, Message: "导入完成"}, nil
+		},
+	}
+	req := newWebMultipartRequest(t, "/api/trading-records/import", nil, []webTestUploadFile{{
+		fieldName: "file",
+		fileName:  "records.csv",
+		content:   []byte("成交日期\t证券代码\n"),
+	}})
+	recorder := httptest.NewRecorder()
+
+	api.importTradingRecordFile(recorder, req)
+
+	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), `"imported":1`) {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	if uploadedPath == "" {
+		t.Fatal("import callback did not receive uploaded path")
+	}
+	if _, err := os.Stat(uploadedPath); !os.IsNotExist(err) {
+		t.Fatalf("trading upload temp file still exists: %v", err)
+	}
+}
+
+func TestWebImportKBFile(t *testing.T) {
+	var uploadedPath string
+	api := &webAPI{
+		uploadKBFile: func(kbName, filePath string) ([]string, error) {
+			if kbName != "研报" {
+				t.Fatalf("kbName = %q", kbName)
+			}
+			uploadedPath = filePath
+			if filepath.Base(filePath) != "report.md" {
+				t.Fatalf("uploaded base name = %q", filepath.Base(filePath))
+			}
+			return []string{"doc-1"}, nil
+		},
+	}
+	req := newWebMultipartRequest(t, "/api/knowledge-base/file/import", map[string]string{"kbName": "研报"}, []webTestUploadFile{{
+		fieldName: "file",
+		fileName:  "report.md",
+		content:   []byte("# 研报"),
+	}})
+	recorder := httptest.NewRecorder()
+
+	api.importKBFile(recorder, req)
+
+	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), `"doc-1"`) {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	if _, err := os.Stat(uploadedPath); !os.IsNotExist(err) {
+		t.Fatalf("knowledge-base upload temp file still exists: %v", err)
+	}
+}
+
+func TestWebImportKBFilesTransfersCleanupOwnership(t *testing.T) {
+	var uploadedPaths []string
+	var cleanup func()
+	api := &webAPI{
+		uploadKBFiles: func(kbName string, filePaths []string, cleanupFn func()) error {
+			if kbName != "研报" {
+				t.Fatalf("kbName = %q", kbName)
+			}
+			uploadedPaths = append([]string(nil), filePaths...)
+			cleanup = cleanupFn
+			return nil
+		},
+	}
+	req := newWebMultipartRequest(t, "/api/knowledge-base/files/import", map[string]string{"kbName": "研报"}, []webTestUploadFile{
+		{fieldName: "files", fileName: "a.md", content: []byte("A")},
+		{fieldName: "files", fileName: "b.txt", content: []byte("B")},
+	})
+	recorder := httptest.NewRecorder()
+
+	api.importKBFiles(recorder, req)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	if len(uploadedPaths) != 2 || cleanup == nil {
+		t.Fatalf("paths = %v, cleanup nil = %v", uploadedPaths, cleanup == nil)
+	}
+	for _, filePath := range uploadedPaths {
+		if _, err := os.Stat(filePath); err != nil {
+			t.Fatalf("background import path unavailable before cleanup: %v", err)
+		}
+	}
+	tempDir := filepath.Dir(filepath.Dir(uploadedPaths[0]))
+	cleanup()
+	if _, err := os.Stat(tempDir); !os.IsNotExist(err) {
+		t.Fatalf("batch upload temp directory still exists: %v", err)
+	}
+}
+
+func TestWebImportKBFilesCleansUpWhenStartFails(t *testing.T) {
+	var tempDir string
+	api := &webAPI{
+		uploadKBFiles: func(_ string, filePaths []string, _ func()) error {
+			tempDir = filepath.Dir(filepath.Dir(filePaths[0]))
+			return errors.New("知识库正在向量化中")
+		},
+	}
+	req := newWebMultipartRequest(t, "/api/knowledge-base/files/import", map[string]string{"kbName": "研报"}, []webTestUploadFile{{
+		fieldName: "files",
+		fileName:  "report.md",
+		content:   []byte("# 研报"),
+	}})
+	recorder := httptest.NewRecorder()
+
+	api.importKBFiles(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	if tempDir == "" {
+		t.Fatal("upload callback did not receive temporary file")
+	}
+	if _, err := os.Stat(tempDir); !os.IsNotExist(err) {
+		t.Fatalf("batch upload temp directory still exists after start failure: %v", err)
+	}
+}
+
+func TestWebUploadValidation(t *testing.T) {
+	t.Run("content type", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/api/trading-records/import", strings.NewReader("{}"))
+		req.Header.Set("Content-Type", "application/json")
+		recorder := httptest.NewRecorder()
+		(&webAPI{}).importTradingRecordFile(recorder, req)
+		if recorder.Code != http.StatusUnsupportedMediaType {
+			t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+		}
+	})
+
+	t.Run("extension", func(t *testing.T) {
+		req := newWebMultipartRequest(t, "/api/knowledge-base/file/import", map[string]string{"kbName": "研报"}, []webTestUploadFile{{
+			fieldName: "file",
+			fileName:  "report.pdf",
+			content:   []byte("pdf"),
+		}})
+		recorder := httptest.NewRecorder()
+		(&webAPI{}).importKBFile(recorder, req)
+		if recorder.Code != http.StatusBadRequest || !strings.Contains(recorder.Body.String(), ".pdf") {
+			t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+		}
+	})
+
+	t.Run("file size", func(t *testing.T) {
+		req := newWebMultipartRequest(t, "/upload", nil, []webTestUploadFile{{
+			fieldName: "file",
+			fileName:  "report.md",
+			content:   []byte("1234"),
+		}})
+		recorder := httptest.NewRecorder()
+		_, failure := receiveWebUploadedFiles(recorder, req, webUploadSpec{
+			fieldName:         "file",
+			description:       "测试文件",
+			tempPrefix:        "go-stock-upload-test-*",
+			maxFiles:          1,
+			maxFileSize:       3,
+			maxTotalFileSize:  4,
+			allowedExtensions: webKBFileExtensions,
+		})
+		if failure == nil || failure.status != http.StatusRequestEntityTooLarge {
+			t.Fatalf("failure = %+v", failure)
+		}
+	})
+
+	t.Run("file count", func(t *testing.T) {
+		req := newWebMultipartRequest(t, "/upload", nil, []webTestUploadFile{
+			{fieldName: "files", fileName: "a.md", content: []byte("A")},
+			{fieldName: "files", fileName: "b.md", content: []byte("B")},
+		})
+		recorder := httptest.NewRecorder()
+		_, failure := receiveWebUploadedFiles(recorder, req, webUploadSpec{
+			fieldName:         "files",
+			description:       "测试文件",
+			tempPrefix:        "go-stock-upload-test-*",
+			maxFiles:          1,
+			maxFileSize:       10,
+			maxTotalFileSize:  20,
+			allowedExtensions: webKBFileExtensions,
+		})
+		if failure == nil || failure.status != http.StatusBadRequest {
+			t.Fatalf("failure = %+v", failure)
+		}
+	})
+
+	t.Run("total file size", func(t *testing.T) {
+		req := newWebMultipartRequest(t, "/upload", nil, []webTestUploadFile{
+			{fieldName: "files", fileName: "a.md", content: []byte("123")},
+			{fieldName: "files", fileName: "b.md", content: []byte("456")},
+		})
+		recorder := httptest.NewRecorder()
+		_, failure := receiveWebUploadedFiles(recorder, req, webUploadSpec{
+			fieldName:         "files",
+			description:       "测试文件",
+			tempPrefix:        "go-stock-upload-test-*",
+			maxFiles:          2,
+			maxFileSize:       3,
+			maxTotalFileSize:  5,
+			allowedExtensions: webKBFileExtensions,
+		})
+		if failure == nil || failure.status != http.StatusRequestEntityTooLarge {
+			t.Fatalf("failure = %+v", failure)
+		}
+	})
+}
+
+func TestWebUploadRouteRejectsCrossOriginRequest(t *testing.T) {
+	server, err := newWebHTTPServer("127.0.0.1:0", &App{}, newWebEventHub())
+	if err != nil {
+		t.Fatalf("newWebHTTPServer() error = %v", err)
+	}
+	req := newWebMultipartRequest(t, "http://127.0.0.1:18888/api/trading-records/import", nil, []webTestUploadFile{{
+		fieldName: "file",
+		fileName:  "records.csv",
+		content:   []byte("成交日期\t证券代码\n"),
+	}})
+	req.Header.Set("Origin", "https://example.com")
+	recorder := httptest.NewRecorder()
+
+	server.Handler.ServeHTTP(recorder, req)
+
+	if recorder.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
 	}
 }
 

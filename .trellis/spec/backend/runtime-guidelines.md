@@ -40,10 +40,82 @@ POST /api/rpc/{method}
 POST /api/rpc        # legacy compatibility
 GET  /api/events
 POST /api/skills/import
+POST /api/trading-records/import
+POST /api/knowledge-base/file/import
+POST /api/knowledge-base/files/import
 GET  /*              # embedded SPA fallback
 ```
 
 参考：`web_server.go`、`web_server_test.go`。
+
+## 浏览器文件能力替代契约
+
+### 1. Scope / Trigger
+
+新增或修改 Desktop 文件选择、上传、保存、下载、打开链接或剪贴板调用时，必须先判断
+浏览器是否有安全的原生等价能力。能等价实现时不得仅通过 `isWebMode` 隐藏入口；窗口、
+托盘、管理员重启、客户端退出和桌面自更新等确无浏览器等价能力时才隐藏并排除 RPC。
+
+### 2. Signatures
+
+- 业务组件继续调用生成的 Wails binding；Web 由 `frontend/src/web-bridge.js` 提供同签名
+  special method，例如 `ImportTradingRecordsFromExcel()`、`PickKBFilePaths()`、
+  `UploadKBFiles(kbName, tokens)`。
+- 客户端文件内容只能进入受限同源 endpoint；服务器路径型 App 方法继续留在
+  `webDesktopOnlyMethods`，不得开放通用 `/api/rpc`。
+- 异步批量上传使用 `StartBatchImportWithCleanup(kbName, filePaths, cleanup)`，cleanup
+  ownership 必须转移给真正读取临时文件的后台任务。
+
+### 3. Contracts
+
+- 浏览器选择器返回页面内 opaque token，token 只用于 Web Bridge 查找 `File`，不能被
+  服务端当作路径解析；上传成功消费 token，失败保留以便重试。
+- multipart 请求使用相对 `/api/*`、受同源中间件保护，并限制 media type、扩展名、数量、
+  单文件大小和请求总量；文件名经过 `filepath.Base` 等价清理后写入独立临时目录。
+- 同步 handler 在返回前清理临时文件；异步 handler 只在启动失败时清理，启动成功后由
+  后台任务在成功、失败或 panic 时清理。
+- Web 响应、轮询状态和文档元数据不得包含服务器临时路径；错误详情可写服务端日志，
+  浏览器只接收稳定安全文案。
+
+### 4. Validation & Error Matrix
+
+| 条件 | 边界行为 |
+| --- | --- |
+| 非 `multipart/form-data` | `415`，不创建临时目录 |
+| 缺少文件/字段、扩展名不支持、文件数量超限 | `400`，清理已创建临时资源 |
+| 单文件或总大小超限 | `413`，清理已创建临时资源 |
+| `Origin` 与 `Host` 不匹配 | `403`，不得进入业务 handler |
+| 同步业务导入失败 | 安全文案 `4xx`，返回前清理 |
+| 异步任务启动失败 | 安全文案 `4xx`，handler 立即清理 |
+| 异步任务运行结束或 panic | 后台 defer cleanup；轮询状态不暴露 panic 值或临时路径 |
+
+### 5. Good / Base / Bad Cases
+
+- Good：交易记录和知识库文本文件使用浏览器选择器、opaque token、multipart endpoint 和
+  lifecycle 测试，Desktop App 方法签名保持不变。
+- Base：确无浏览器替代的窗口或托盘能力在 Web UI 隐藏，并由 allowlist 拒绝直接 RPC。
+- Bad：只隐藏浏览器可实现的文件入口；把客户端路径作为 JSON RPC 参数；上传成功后由
+  handler 提前删除后台仍需读取的文件；返回“成功”但不执行任何动作。
+
+### 6. Tests Required
+
+- Web Bridge/静态检查：生成 binding 方法有对应 special method，取消选择保持原 Promise
+  语义，重复点击有 loading guard，成功/失败分别消费或保留 token。
+- HTTP tests：合法上传、Content-Type、扩展名、缺少字段、数量、单文件/总大小、同源拒绝、
+  服务器路径型 RPC 排除和同步 cleanup。
+- Agent lifecycle tests：启动失败 cleanup、后台完成 cleanup、panic cleanup，以及批量结果、
+  状态和元数据均不包含临时路径。
+- 构建：`go build .`、`go test -tags web .`、Linux Web 交叉编译和前端 build。
+
+### 7. Wrong vs Correct
+
+```js
+// Wrong：浏览器有原生文件选择能力却直接隐藏。
+const visible = !isWebMode
+
+// Correct：组件继续调用同一 binding，Web Bridge 负责选择 File 并上传到受限 endpoint。
+await UploadKBFiles(kbName, opaqueFileTokens)
+```
 
 ## 事件桥
 

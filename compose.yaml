@@ -24,6 +24,7 @@ services:
       - go-stock-data:/app/data
       - go-stock-skills:/app/skills
       - go-stock-logs:/app/logs
+      - go-stock-memory:/app/memory
     healthcheck:
       test: ["CMD", "curl", "--fail", "--silent", "--show-error", "http://127.0.0.1:18888/api/health"]
       interval: 30s
@@ -39,3 +40,5 @@ volumes:
     name: go-stock-skills
   go-stock-logs:
     name: go-stock-logs
+  go-stock-memory:
+    name: go-stock-memory

@@ -594,7 +594,7 @@
           <!-- 添加文档 -->
           <n-card title="添加文档" size="small" :bordered="true">
             <n-tabs type="line" size="small" animated>
-              <n-tab-pane v-if="!isWebMode" name="file" tab="上传文件（支持多选）">
+              <n-tab-pane name="file" tab="上传文件（支持多选）">
                 <n-space vertical :size="8" style="width: 100%">
                   <n-space :size="8" style="width: 100%" align="center">
                     <n-button @click="handlePickFiles" :loading="picking">
@@ -770,7 +770,6 @@ import html2canvas from 'html2canvas'
 import { EventsOn, EventsOff } from '../../wailsjs/runtime'
 import { MdPreview } from 'md-editor-v3'
 import 'md-editor-v3/lib/preview.css'
-import {isWebMode} from '../runtime-env'
 
 // md-editor 主题：跟随应用暗色设置（与 skill-manager 一致）
 const mdTheme = ref('light')
@@ -1381,10 +1380,11 @@ function removeUploadFile(idx) {
 }
 
 async function handleUploadFiles() {
-  if (uploadFileList.value.length === 0) return
+  if (uploadFileList.value.length === 0 || uploading.value) return
   const kbName = currentKB.value.name
   const paths = uploadFileList.value.map(f => f.path)
   const fileCount = paths.length
+  uploading.value = true
   try {
     // 异步启动后台导入，立即返回
     await UploadKBFiles(kbName, paths)
@@ -1394,6 +1394,8 @@ async function handleUploadFiles() {
     startVectorizingPoll()
   } catch (e) {
     message.error(`启动批量导入失败: ${e}`)
+  } finally {
+    uploading.value = false
   }
 }
 

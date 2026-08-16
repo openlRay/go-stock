@@ -11,11 +11,14 @@
    Wails 窗口、托盘、对话框、退出、自更新或仅桌面可用的实现。
 2. 检查新增/修改的 `App` 方法、`frontend/wailsjs/go/main/App.js`、
    `frontend/src/web-bridge.js` 和 Web RPC 允许列表，保证参数、返回、错误和事件一致。
-3. 检查业务事件通过共享 emitter 同时到达 Wails 与 SSE；Web 请求继续遵守同源检查，
+3. 检查桌面选文件、上传、保存和下载能力是否可由浏览器文件选择器、multipart 上传或
+   Blob 下载等标准能力等价实现；可实现时不得仅隐藏 Web 入口。
+4. 检查业务事件通过共享 emitter 同时到达 Wails 与 SSE；Web 请求继续遵守同源检查，
    Vite `/api` 代理保持 `changeOrigin: false`。
-4. 检查 Docker 仍以 Web 模式启动，浏览器解析顺序保持
-   `Settings.BrowserPath > CHROME_BIN > CheckBrowser()`，数据/技能/日志目录继续持久化。
-5. 从合并后的源重新生成绑定或静态资源，不手改生成物。
+5. 检查 Docker 仍以 Web 模式启动，浏览器解析顺序保持
+   `Settings.BrowserPath > CHROME_BIN > CheckBrowser()`，数据/技能/日志/向量记忆目录继续持久化；
+   首次增加 memory volume 时先迁移旧容器层的 `/app/memory`，不能假设空卷会自动继承旧数据。
+6. 从合并后的源重新生成绑定或静态资源，不手改生成物。
 
 ## Web 方法与运行中服务
 
@@ -34,14 +37,23 @@ Vue 调用 → frontend/wailsjs/go/main/App.js 与 App.d.ts → Go App 方法 �
   build/recreate，不能只刷新页面或重启旧镜像。
 - 若新页面报 `未知方法`，先比较运行进程启动时间、当前源码绑定和直接 `/api/rpc`
   响应；确认运行时新鲜后，才把空数据归因于第三方接口。
+- Desktop-only 方法即使由 Web Bridge 提供等价实现，也继续从通用反射 RPC 排除；文件
+  内容通过受限 multipart endpoint 传输，不能允许浏览器把服务器路径作为普通参数调用。
 
-## 桌面能力必须在 Web 隐藏
+## 桌面能力的 Web 替代决策
 
 - `HideWindow`、系统托盘、桌面通知、自更新、管理员重启和 Wails 对话框等实现使用
   `windows && !web`、`darwin && !web` 或 `linux && !web` 等互斥 build tag。
-- Web UI 隐藏不可用入口，Web RPC 拒绝对应 App 方法；不要用“返回成功但无行为”的
-  空实现伪装兼容。只有浏览器确有原生等价能力时，才在 bridge 中实现选文件、下载或
-  打开链接。
+- 对每个 Desktop-only 调用先判断浏览器原生能力，而不是直接隐藏：
+  - 浏览器能够等价实现的选文件、上传、保存、下载、打开链接和剪贴板操作，必须在
+    `web-bridge.js` 提供同签名 adapter，并按需增加同源、限量、类型受控的专用接口；
+  - 交易记录 Excel/文本导入和知识库文本文件单/多选上传属于必须提供浏览器原生替代
+    的正例，不能因为 Desktop 使用绝对路径就隐藏 Web UI；
+  - 窗口、托盘、管理员重启、客户端退出和桌面自更新等确无浏览器等价能力的功能，才
+    隐藏 Web UI 并让 Web RPC 拒绝对应 App 方法。
+- 不要用“返回成功但无行为”的空实现伪装兼容。浏览器替代必须保持原 Promise 返回形状、
+  用户取消语义和错误反馈；multipart 上传还要覆盖扩展名、数量、大小、临时文件生命周期
+  与同源拒绝测试。
 - 修改平台文件后增加 Windows Web 交叉编译，捕获 Linux Web build 看不到的
   `syscall.SysProcAttr.HideWindow` 等符号：
 
@@ -85,9 +97,9 @@ npm --prefix frontend run build
 | 子系统 | 重点路径 | 必须保护的本地契约 | 建议验证 | 阻断条件 |
 | --- | --- | --- | --- | --- |
 | Web/桌面双模式 | `main*.go`、`app*.go`、`web_server*.go` | 桌面默认入口保持可用；`web` build tag 只启用无 GUI 服务；RPC、SSE、同源检查和事件边界不回归 | `go build .`；`go test -tags web .`；Linux Web build；触及平台文件时增加 Windows Web build | Web 路径调用 Wails 窗口、托盘、对话框、退出或更新能力；用成功空实现掩盖不可用能力；无法同时编译两种模式 |
-| Docker 与运行时 | `Dockerfile`、`compose.yaml`、`scripts/dev-web.sh`、`frontend/src/runtime-env.js` | 容器继续以 Web 模式运行；Node 22、Go 1.26、Debian bookworm、4 GB Node heap、UID/GID 10001 和持久化目录契约不丢失 | `docker compose config`；静态核对启动命令；Docker 可用时执行 smoke | 上游改动覆盖本地 Web 启动方式、代理配置、端口、用户身份或数据持久化策略且无法兼容 |
+| Docker 与运行时 | `Dockerfile`、`compose.yaml`、`scripts/dev-web.sh`、`frontend/src/runtime-env.js` | 容器继续以 Web 模式运行；Node 22、Go 1.26、Debian bookworm、4 GB Node heap、UID/GID 10001；`/app/data`、`/app/skills`、`/app/logs`、`/app/memory` 持久化契约不丢失 | `docker compose config`；静态核对启动命令和四个 volume；Docker 可用时执行 smoke/recreate 持久化检查 | 上游改动覆盖本地 Web 启动方式、代理配置、端口、用户身份或数据/向量记忆持久化策略且无法兼容 |
 | Agent 与沙箱工具 | `backend/agent/**`、`backend/agent/tools/**`、`backend/data/tool_prompt_template.go` | 保留工具分组、沙箱根目录、流式 shell、跨平台 build-tag 文件和错误边界 | 运行相关 Go tests；核对 Unix/Windows 文件配对和路径根 | 工具可以越过沙箱根目录、平台实现缺失、上游 Agent 协议与本地工具契约无法同时成立 |
-| Web/Wails 前端桥接 | `frontend/src/web-bridge.js`、`frontend/src/App.vue`、`frontend/src/main.js`、`frontend/wailsjs/**` | Web 与 Wails 调用保持等价；事件和错误能传回 UI；生成绑定来自 Go 接口；运行后端使用本轮新绑定 | 前端 build；比较 Vue 调用、生成绑定、Go 方法和 allowlist；重启后做新增 RPC smoke | 需要手工修改生成绑定、运行中后端仍嵌入旧绑定、Web/Wails 只能保留一条路径或事件语义无法确定 |
+| Web/Wails 前端桥接 | `frontend/src/web-bridge.js`、`frontend/src/App.vue`、`frontend/src/main.js`、`frontend/wailsjs/**` | Web 与 Wails 调用保持等价；浏览器可替代的文件选择/上传/保存/下载不得仅隐藏；服务器路径型方法继续排除通用 RPC；事件和错误能传回 UI；生成绑定来自 Go 接口 | 前端 build；比较 Vue 调用、生成绑定、Go 方法、special method、专用上传接口和 allowlist；对 multipart 类型/数量/大小/cleanup/同源拒绝做定点测试；重启后做新增接口 smoke | 浏览器有安全等价能力却只隐藏入口；把客户端路径交给服务器读取；专用上传接口无大小/类型限制；需要手工修改生成绑定；运行中后端仍嵌入旧绑定；Web/Wails 返回语义无法兼容 |
 | 第三方数据请求 | `backend/data/**`、对应 App 方法与 Vue 组件 | 使用共享 client、HTTPS、结构化参数和输入校验；公开参数语义真实 | 非法输入单元测试；合法请求 smoke；检查 URL 构造和参数流 | 用户输入直接拼 URL、参数被静默忽略、Web RPC 未发出请求却误判第三方为空 |
 | AI Web 前端 | `ai-assistant-web/frontend/**`、`ai-assistant-web/static/**` | TypeScript/Vite 源码可构建；静态产物只能由源码生成 | `npm --prefix ai-assistant-web/frontend run build`；核对源与静态产物 | 只有压缩产物发生冲突，找不到对应源码或可重复构建命令 |
 | 依赖与生成链路 | `go.mod`、`go.sum`、`frontend/package*.json`、`ai-assistant-web/frontend/package*.json`、`frontend/wailsjs/**` | Go/Wails/Node 版本约束兼容；声明与 lockfile 一致；生成物可追溯 | `go mod verify`；受影响前端 build；项目支持的 Wails 生成/构建命令 | 依赖要求互斥、校验失败、lockfile 无法由声明重建或生成命令未知 |

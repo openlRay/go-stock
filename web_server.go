@@ -10,6 +10,7 @@ import (
 	"io"
 	"io/fs"
 	"mime"
+	"mime/multipart"
 	"net/http"
 	"net/url"
 	"os"
@@ -20,6 +21,9 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"go-stock/backend/agent"
+	"go-stock/backend/data"
 )
 
 //go:embed frontend/wailsjs/go/main/App.js
@@ -45,6 +49,24 @@ var webDesktopOnlyMethods = map[string]struct{}{
 	"UploadKBFiles":                 {},
 }
 
+const (
+	webTradingImportMaxSize = int64(20 << 20)
+	webKBFileMaxSize        = int64(10 << 20)
+	webKBBatchMaxSize       = int64(100 << 20)
+	webKBBatchMaxFiles      = 20
+	webMultipartMemory      = int64(8 << 20)
+	webMultipartOverhead    = int64(1 << 20)
+)
+
+var (
+	webTradingImportExtensions = map[string]struct{}{
+		".csv": {}, ".txt": {}, ".xls": {}, ".xlsx": {},
+	}
+	webKBFileExtensions = map[string]struct{}{
+		".md": {}, ".markdown": {}, ".txt": {},
+	}
+)
+
 type webRPCRequest struct {
 	Method string            `json:"method"`
 	Args   []json.RawMessage `json:"args"`
@@ -53,6 +75,33 @@ type webRPCRequest struct {
 type webRPCResponse struct {
 	Result any    `json:"result"`
 	Error  string `json:"error,omitempty"`
+}
+
+type webUploadSpec struct {
+	fieldName         string
+	description       string
+	tempPrefix        string
+	maxFiles          int
+	maxFileSize       int64
+	maxTotalFileSize  int64
+	allowedExtensions map[string]struct{}
+}
+
+type webUploadFailure struct {
+	status  int
+	message string
+}
+
+type webUploadedFiles struct {
+	tempDir string
+	paths   []string
+}
+
+func (u *webUploadedFiles) cleanup() {
+	if u != nil && u.tempDir != "" {
+		_ = os.RemoveAll(u.tempDir)
+		u.tempDir = ""
+	}
 }
 
 type webEvent struct {
@@ -111,10 +160,13 @@ func (h *webEventHub) unsubscribe(client chan []byte) {
 }
 
 type webAPI struct {
-	app            *App
-	hub            *webEventHub
-	allowedMethods map[string]struct{}
-	staticFS       fs.FS
+	app                  *App
+	hub                  *webEventHub
+	allowedMethods       map[string]struct{}
+	staticFS             fs.FS
+	importTradingRecords func(string) (*data.TradingRecordImportResult, error)
+	uploadKBFile         func(string, string) ([]string, error)
+	uploadKBFiles        func(string, []string, func()) error
 }
 
 func newWebHTTPServer(addr string, app *App, hub *webEventHub) (*http.Server, error) {
@@ -131,6 +183,8 @@ func newWebHTTPServer(addr string, app *App, hub *webEventHub) (*http.Server, er
 		hub:            hub,
 		allowedMethods: allowedMethods,
 		staticFS:       staticFS,
+		uploadKBFile:   agent.AddUploadedFileToKB,
+		uploadKBFiles:  agent.StartBatchImportWithCleanup,
 	}
 
 	mux := http.NewServeMux()
@@ -139,6 +193,9 @@ func newWebHTTPServer(addr string, app *App, hub *webEventHub) (*http.Server, er
 	mux.HandleFunc("/api/rpc/", api.rpc)
 	mux.HandleFunc("/api/events", api.events)
 	mux.HandleFunc("/api/skills/import", api.importSkill)
+	mux.HandleFunc("/api/trading-records/import", api.importTradingRecordFile)
+	mux.HandleFunc("/api/knowledge-base/file/import", api.importKBFile)
+	mux.HandleFunc("/api/knowledge-base/files/import", api.importKBFiles)
 	mux.HandleFunc("/", api.serveSPA)
 
 	server := &http.Server{
@@ -203,6 +260,239 @@ func (a *webAPI) importSkill(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeWebJSON(w, http.StatusOK, webRPCResponse{Result: a.app.importSkillPackage(tempPath, header.Filename)})
+}
+
+func (a *webAPI) importTradingRecordFile(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	uploaded, failure := receiveWebUploadedFiles(w, r, webUploadSpec{
+		fieldName:         "file",
+		description:       "交易记录文件",
+		tempPrefix:        "go-stock-trading-import-*",
+		maxFiles:          1,
+		maxFileSize:       webTradingImportMaxSize,
+		maxTotalFileSize:  webTradingImportMaxSize,
+		allowedExtensions: webTradingImportExtensions,
+	})
+	if failure != nil {
+		writeWebJSON(w, failure.status, webRPCResponse{Error: failure.message})
+		return
+	}
+	defer uploaded.cleanup()
+
+	importer := a.importTradingRecords
+	if importer == nil {
+		importer = data.NewStockDataApi().ImportTradingRecords
+	}
+	result, err := importer(uploaded.paths[0])
+	if err != nil {
+		writeWebJSON(w, http.StatusBadRequest, webRPCResponse{Error: "导入交易记录失败: " + sanitizeWebUploadError(err, uploaded.tempDir)})
+		return
+	}
+	writeWebJSON(w, http.StatusOK, webRPCResponse{Result: result})
+}
+
+func (a *webAPI) importKBFile(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	uploaded, failure := receiveWebUploadedFiles(w, r, webUploadSpec{
+		fieldName:         "file",
+		description:       "知识库文件",
+		tempPrefix:        "go-stock-kb-file-*",
+		maxFiles:          1,
+		maxFileSize:       webKBFileMaxSize,
+		maxTotalFileSize:  webKBFileMaxSize,
+		allowedExtensions: webKBFileExtensions,
+	})
+	if failure != nil {
+		writeWebJSON(w, failure.status, webRPCResponse{Error: failure.message})
+		return
+	}
+	defer uploaded.cleanup()
+
+	kbName := webMultipartValue(r, "kbName")
+	if kbName == "" {
+		writeWebJSON(w, http.StatusBadRequest, webRPCResponse{Error: "知识库名称不能为空"})
+		return
+	}
+	uploader := a.uploadKBFile
+	if uploader == nil {
+		uploader = agent.AddUploadedFileToKB
+	}
+	docIDs, err := uploader(kbName, uploaded.paths[0])
+	if err != nil {
+		writeWebJSON(w, http.StatusBadRequest, webRPCResponse{Error: "导入知识库文件失败: " + sanitizeWebUploadError(err, uploaded.tempDir)})
+		return
+	}
+	writeWebJSON(w, http.StatusOK, webRPCResponse{Result: docIDs})
+}
+
+func (a *webAPI) importKBFiles(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		return
+	}
+	uploaded, failure := receiveWebUploadedFiles(w, r, webUploadSpec{
+		fieldName:         "files",
+		description:       "知识库文件",
+		tempPrefix:        "go-stock-kb-files-*",
+		maxFiles:          webKBBatchMaxFiles,
+		maxFileSize:       webKBFileMaxSize,
+		maxTotalFileSize:  webKBBatchMaxSize,
+		allowedExtensions: webKBFileExtensions,
+	})
+	if failure != nil {
+		writeWebJSON(w, failure.status, webRPCResponse{Error: failure.message})
+		return
+	}
+
+	kbName := webMultipartValue(r, "kbName")
+	if kbName == "" {
+		uploaded.cleanup()
+		writeWebJSON(w, http.StatusBadRequest, webRPCResponse{Error: "知识库名称不能为空"})
+		return
+	}
+	uploader := a.uploadKBFiles
+	if uploader == nil {
+		uploader = agent.StartBatchImportWithCleanup
+	}
+	if err := uploader(kbName, uploaded.paths, uploaded.cleanup); err != nil {
+		message := sanitizeWebUploadError(err, uploaded.tempDir)
+		uploaded.cleanup()
+		writeWebJSON(w, http.StatusBadRequest, webRPCResponse{Error: "启动知识库文件导入失败: " + message})
+		return
+	}
+	writeWebJSON(w, http.StatusOK, webRPCResponse{Result: nil})
+}
+
+func receiveWebUploadedFiles(w http.ResponseWriter, r *http.Request, spec webUploadSpec) (*webUploadedFiles, *webUploadFailure) {
+	if !hasWebMediaType(r, "multipart/form-data") {
+		return nil, &webUploadFailure{status: http.StatusUnsupportedMediaType, message: spec.description + "上传必须使用 multipart/form-data"}
+	}
+	if spec.maxFiles <= 0 || spec.maxFileSize <= 0 || spec.maxTotalFileSize <= 0 {
+		return nil, &webUploadFailure{status: http.StatusInternalServerError, message: "上传配置无效"}
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, spec.maxTotalFileSize+webMultipartOverhead)
+	if err := r.ParseMultipartForm(webMultipartMemory); err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			return nil, &webUploadFailure{status: http.StatusRequestEntityTooLarge, message: spec.description + "上传总大小超过限制"}
+		}
+		return nil, &webUploadFailure{status: http.StatusBadRequest, message: "读取" + spec.description + "失败"}
+	}
+	if r.MultipartForm != nil {
+		defer r.MultipartForm.RemoveAll()
+	}
+	if r.MultipartForm == nil {
+		return nil, &webUploadFailure{status: http.StatusBadRequest, message: "读取" + spec.description + "失败"}
+	}
+
+	headers := r.MultipartForm.File[spec.fieldName]
+	if len(headers) == 0 {
+		return nil, &webUploadFailure{status: http.StatusBadRequest, message: "请选择" + spec.description}
+	}
+	if len(headers) > spec.maxFiles {
+		return nil, &webUploadFailure{status: http.StatusBadRequest, message: fmt.Sprintf("%s数量不能超过 %d 个", spec.description, spec.maxFiles)}
+	}
+
+	tempDir, err := os.MkdirTemp("", spec.tempPrefix)
+	if err != nil {
+		return nil, &webUploadFailure{status: http.StatusInternalServerError, message: "创建上传临时目录失败"}
+	}
+	uploaded := &webUploadedFiles{tempDir: tempDir, paths: make([]string, 0, len(headers))}
+	totalSize := int64(0)
+	for index, header := range headers {
+		fileName := sanitizeWebUploadFileName(header.Filename)
+		if fileName == "" {
+			uploaded.cleanup()
+			return nil, &webUploadFailure{status: http.StatusBadRequest, message: spec.description + "名称无效"}
+		}
+		extension := strings.ToLower(filepath.Ext(fileName))
+		if _, ok := spec.allowedExtensions[extension]; !ok {
+			uploaded.cleanup()
+			return nil, &webUploadFailure{status: http.StatusBadRequest, message: fmt.Sprintf("不支持 %s 文件", extension)}
+		}
+
+		fileDir := filepath.Join(tempDir, fmt.Sprintf("%02d", index))
+		if err := os.Mkdir(fileDir, 0o700); err != nil {
+			uploaded.cleanup()
+			return nil, &webUploadFailure{status: http.StatusInternalServerError, message: "创建上传临时目录失败"}
+		}
+		filePath := filepath.Join(fileDir, fileName)
+		written, err := saveWebUploadPart(header, filePath, spec.maxFileSize)
+		if err != nil {
+			uploaded.cleanup()
+			return nil, &webUploadFailure{status: http.StatusBadRequest, message: "保存" + spec.description + "失败"}
+		}
+		if written > spec.maxFileSize {
+			uploaded.cleanup()
+			return nil, &webUploadFailure{status: http.StatusRequestEntityTooLarge, message: fmt.Sprintf("%s %q 超过单文件大小限制", spec.description, fileName)}
+		}
+		totalSize += written
+		if totalSize > spec.maxTotalFileSize {
+			uploaded.cleanup()
+			return nil, &webUploadFailure{status: http.StatusRequestEntityTooLarge, message: spec.description + "上传总大小超过限制"}
+		}
+		uploaded.paths = append(uploaded.paths, filePath)
+	}
+	return uploaded, nil
+}
+
+func saveWebUploadPart(header *multipart.FileHeader, filePath string, maxSize int64) (int64, error) {
+	source, err := header.Open()
+	if err != nil {
+		return 0, err
+	}
+	defer source.Close()
+
+	target, err := os.OpenFile(filePath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		return 0, err
+	}
+	written, copyErr := io.Copy(target, io.LimitReader(source, maxSize+1))
+	closeErr := target.Close()
+	if copyErr != nil {
+		return written, copyErr
+	}
+	if closeErr != nil {
+		return written, closeErr
+	}
+	return written, nil
+}
+
+func sanitizeWebUploadFileName(fileName string) string {
+	fileName = filepath.Base(strings.ReplaceAll(strings.TrimSpace(fileName), "\\", "/"))
+	if fileName == "" || fileName == "." {
+		return ""
+	}
+	return fileName
+}
+
+func sanitizeWebUploadError(err error, tempDir string) string {
+	if err == nil {
+		return ""
+	}
+	message := err.Error()
+	if tempDir != "" {
+		message = strings.ReplaceAll(message, tempDir, "上传文件")
+	}
+	return message
+}
+
+func webMultipartValue(r *http.Request, name string) string {
+	if r.MultipartForm == nil {
+		return ""
+	}
+	values := r.MultipartForm.Value[name]
+	if len(values) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(values[0])
 }
 
 func loadWebBindingMethods() (map[string]struct{}, error) {

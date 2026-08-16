@@ -104,6 +104,7 @@ dist
 .tern-port
 
 ai-doc
+memory/
 .DS_Store
 .trae
 .qoder
