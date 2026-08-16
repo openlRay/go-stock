@@ -1496,21 +1496,22 @@ type SecuritiesCompanyOpinionData struct {
 }
 
 type CronTask struct {
-	ID            uint       `json:"id" gorm:"primarykey"`
-	CreatedAt     time.Time  `json:"createdAt"`
-	UpdatedAt     time.Time  `json:"updatedAt"`
-	Name          string     `json:"name" gorm:"size:255;not null"`
-	CronExpr      string     `json:"cronExpr" gorm:"size:100;not null"`
-	TaskType      string     `json:"taskType" gorm:"size:50;not null"` // stock_analysis, fund_analysis, news_fetch, custom
-	Target        string     `json:"target" gorm:"size:255"`           // 股票代码或其他目标
-	Params        string     `json:"params" gorm:"type:text"`          // JSON 格式的任务参数
-	Enable        bool       `json:"enable" gorm:"default:true"`
-	LastRunAt     *time.Time `json:"lastRunAt"`
-	NextRunAt     *time.Time `json:"nextRunAt"`
-	RunCount      int64      `json:"runCount" gorm:"default:0"`
-	Status        string     `json:"status" gorm:"size:20;default:active"` // active, paused, error
-	Description   string     `json:"description" gorm:"size:500"`
-	LastRunResult string     `json:"lastRunResult" gorm:"size:500"`
+	ID                 uint       `json:"id" gorm:"primarykey"`
+	CreatedAt          time.Time  `json:"createdAt"`
+	UpdatedAt          time.Time  `json:"updatedAt"`
+	Name               string     `json:"name" gorm:"size:255;not null"`
+	CronExpr           string     `json:"cronExpr" gorm:"size:100;not null"`
+	TaskType           string     `json:"taskType" gorm:"size:50;not null"` // stock_analysis, fund_analysis, news_fetch, custom, motto_push
+	Target             string     `json:"target" gorm:"size:255"`           // 股票代码或其他目标
+	Params             string     `json:"params" gorm:"type:text"`          // JSON 格式的任务参数
+	Enable             bool       `json:"enable" gorm:"default:true"`
+	NotifyOnCompletion bool       `json:"notifyOnCompletion" gorm:"column:notify_on_completion;not null;default:false"`
+	LastRunAt          *time.Time `json:"lastRunAt"`
+	NextRunAt          *time.Time `json:"nextRunAt"`
+	RunCount           int64      `json:"runCount" gorm:"default:0"`
+	Status             string     `json:"status" gorm:"size:20;default:active"` // active, paused, error
+	Description        string     `json:"description" gorm:"size:500"`
+	LastRunResult      string     `json:"lastRunResult" gorm:"size:500"`
 }
 
 func (CronTask) TableName() string {

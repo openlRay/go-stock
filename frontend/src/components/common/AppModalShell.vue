@@ -2,6 +2,7 @@
   <n-modal
     :show="show"
     :mask-closable="maskClosable"
+    :z-index="zIndex"
     transform-origin="center"
     @update:show="handleShowChange"
   >
@@ -42,7 +43,8 @@ defineProps({
   title: { type: String, required: true },
   ariaLabel: { type: String, default: '' },
   width: { type: String, default: '760px' },
-  maskClosable: { type: Boolean, default: false }
+  maskClosable: { type: Boolean, default: false },
+  zIndex: { type: Number, default: undefined }
 })
 
 const emit = defineEmits(['update:show'])

@@ -63,6 +63,61 @@ requestConfig := WithSessionThinkingOverride(savedConfig, sessionThinking)
 - 前端或其他消费者通过 request ID 和业务 ID 过滤过期事件，不解析可变错误字符串决定状态。
 - 保存失败发独立错误状态，不能先发 completed 再尝试 reload 或落库。
 
+## 场景：模型配置草稿可用性测试
+
+### 1. Scope / Trigger
+
+配置页需要在保存前验证 chat 或 embedding 服务是否可用时适用；测试属于一次真实但最小的请求，不是配置持久化流程。
+
+### 2. Signatures
+
+- RPC：`TestAIConfig(config *data.AIConfig) *models.AIConfigTestResult`。
+- Service：`AIConfigTestService.Test(ctx context.Context, config *data.AIConfig) *models.AIConfigTestResult`。
+- Result：`success`、安全 `message`、`latencyMillis`、可选且受限的 `responsePreview`。
+
+### 3. Contracts
+
+- RPC 接收完整配置副本；不得先创建、更新或读取数据库记录来完成测试。
+- chat 复用统一 model factory；embedding 请求标准 `/embeddings`，并校验至少一个非空向量。
+- 测试副本关闭 reasoning，继承配置级 proxy、extra headers 和 timeout；context 与 HTTP client 都必须受同一请求上界约束。
+- 返回值只包含用户可操作的安全摘要。API Key、reasoning、完整 provider body、带路径的 endpoint 和代理凭据不得进入结果或日志。
+
+### 4. Validation & Error Matrix
+
+| 条件 | 行为 |
+| --- | --- |
+| 配置为空或字段校验失败 | 不发网络请求，返回安全校验文案 |
+| chat 返回空 final content | `success=false`，不回传 reasoning 或原始 response |
+| embedding 非 2xx、格式错误或空向量 | 返回分类安全文案，不回传 provider body |
+| context 取消或超时 | 分别返回“已取消”或“连接超时”，请求停止 |
+| 返回文本包含当前 API Key | preview 脱敏后再截断 |
+
+### 5. Good / Base / Bad Cases
+
+- Good：编辑抽屉把未保存草稿直接交给 dry-run service，测试完成后数据库内容和草稿状态都不变。
+- Base：列表对已保存配置组装同样的完整副本，复用同一 RPC。
+- Bad：为了测试先保存草稿；直接把 `err.Error()`、响应 body 或 reasoning 展示给前端。
+
+### 6. Tests Required
+
+- fake chat model 覆盖成功、空响应、provider error、取消和超时，并断言源配置未被修改。
+- `httptest.Server` 覆盖 embedding method/path/body、extra header、proxy、超时、非 2xx、非法 JSON 和空向量。
+- App/RPC 测试断言草稿零写入，结果及日志不包含 API Key、完整 provider body 或代理凭据。
+- routine test 不访问真实模型服务。
+
+### 7. Wrong vs Correct
+
+```go
+// Wrong：测试行为污染保存配置，并把底层错误原文暴露给 UI。
+db.Save(config)
+return &Result{Message: err.Error()}
+
+// Correct：复制配置、设置请求级边界，只返回安全摘要。
+requestConfig := cloneAIConfigForTest(config)
+requestConfig = data.WithSessionThinkingOverride(requestConfig, false)
+return tester.Test(ctx, &requestConfig)
+```
+
 ## 禁止模式
 
 - 直接信任模型返回的 Cron、SQL、URL、ID 或权限结论。

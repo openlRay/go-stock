@@ -8,6 +8,7 @@ const routes = [
   { path: '/fund', component: () => import('../components/fund.vue'), name: 'fund' },
   { path: '/settings', component: () => import('../components/settings.vue'), name: 'settings' },
   { path: '/about', component: () => import('../components/about.vue'), name: 'about' },
+  { path: '/my', component: () => import('../components/my.vue'), name: 'my' },
   { path: '/market', component: () => import('../components/market.vue'), name: 'market' },
   { path: '/agent', component: () => import('../components/agent-chat.vue'), name: 'agent' },
   { path: '/research', component: () => import('../components/researchIndex.vue'), name: 'research' },

@@ -1,8 +1,10 @@
 <template>
+  <!-- 父级任务弹框固定在 2000；子弹框必须更高，避免遮罩和内容被父层覆盖。 -->
   <AppModalShell
     :show="show"
     title="执行时间设置"
     aria-label="执行时间设置"
+    :z-index="2100"
     @update:show="handleShowChange"
   >
     <section class="ai-panel">

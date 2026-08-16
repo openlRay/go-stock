@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"go-stock/backend/data"
+	"go-stock/backend/db"
 	"go-stock/backend/models"
 	"mime/multipart"
 	"net/http"
@@ -15,9 +16,13 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/glebarez/sqlite"
+	"gorm.io/gorm"
 )
 
 type webTestUploadFile struct {
@@ -66,6 +71,8 @@ func TestLoadWebBindingMethods(t *testing.T) {
 		"GetAnnouncementAIAnalysis", "StartAnnouncementAIAnalysis", "AbortAnnouncementAIAnalysis",
 		"ChatWithAgentKBQA", "CreateKnowledgeBase", "GetUserProfile",
 		"SubmitAgentFeedback", "RunRecommendBacktest",
+		"GetMottos", "CreateMotto", "UpdateMotto", "DeleteMotto", "PolishMotto",
+		"TestAIConfig",
 	} {
 		if _, ok := methods[name]; !ok {
 			t.Fatalf("binding method %s not found", name)
@@ -83,6 +90,35 @@ func TestLoadWebBindingMethods(t *testing.T) {
 		if _, ok := methods[name]; ok {
 			t.Fatalf("server-file method %s must be hidden from Web RPC", name)
 		}
+	}
+}
+
+func TestWebCronTaskExecutedEventSerialization(t *testing.T) {
+	hub := newWebEventHub()
+	client := hub.subscribe()
+	defer hub.unsubscribe(client)
+
+	hub.Emit(models.CronTaskExecutedEventName, models.CronTaskExecutedEvent{
+		TaskID:      42,
+		Success:     true,
+		CompletedAt: time.Date(2026, time.August, 16, 18, 30, 0, 0, time.FixedZone("CST", 8*60*60)),
+	})
+
+	select {
+	case payload := <-client:
+		var event webEvent
+		if err := json.Unmarshal(payload, &event); err != nil {
+			t.Fatalf("json.Unmarshal() error = %v", err)
+		}
+		encoded, err := json.Marshal(event.Data[0])
+		if err != nil {
+			t.Fatalf("json.Marshal() error = %v", err)
+		}
+		if event.Name != models.CronTaskExecutedEventName || !strings.Contains(string(encoded), `"taskId":42`) || !strings.Contains(string(encoded), `"success":true`) {
+			t.Fatalf("serialized cron event = %s, name=%s", encoded, event.Name)
+		}
+	default:
+		t.Fatal("cron task event not broadcast")
 	}
 }
 
@@ -151,6 +187,69 @@ func TestCallWebMethod(t *testing.T) {
 	}
 	if timezone["location"] != "Asia/Shanghai" {
 		t.Fatalf("location = %v", timezone["location"])
+	}
+}
+
+func TestCallWebMottoMethods(t *testing.T) {
+	previous := db.Dao
+	database, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open test db: %v", err)
+	}
+	if err := database.AutoMigrate(&models.Motto{}); err != nil {
+		t.Fatalf("migrate motto table: %v", err)
+	}
+	db.Dao = database
+	t.Cleanup(func() { db.Dao = previous })
+
+	app := &App{}
+	createdValue, err := callWebMethod(app, "CreateMotto", []json.RawMessage{json.RawMessage(`"保持耐心"`)})
+	if err != nil {
+		t.Fatalf("CreateMotto reflection call error = %v", err)
+	}
+	created, ok := createdValue.(*models.Motto)
+	if !ok || created.ID == 0 {
+		t.Fatalf("CreateMotto result = %#v", createdValue)
+	}
+
+	updatedValue, err := callWebMethod(app, "UpdateMotto", []json.RawMessage{
+		json.RawMessage(strconv.FormatUint(uint64(created.ID), 10)),
+		json.RawMessage(`"长期主义"`),
+	})
+	if err != nil {
+		t.Fatalf("UpdateMotto reflection call error = %v", err)
+	}
+	updated, ok := updatedValue.(*models.Motto)
+	if !ok || updated.Content != "长期主义" {
+		t.Fatalf("UpdateMotto result = %#v", updatedValue)
+	}
+
+	listValue, err := callWebMethod(app, "GetMottos", nil)
+	if err != nil {
+		t.Fatalf("GetMottos reflection call error = %v", err)
+	}
+	list, ok := listValue.([]models.Motto)
+	if !ok || len(list) != 1 || list[0].Content != "长期主义" {
+		t.Fatalf("GetMottos result = %#v", listValue)
+	}
+
+	if _, err := callWebMethod(app, "DeleteMotto", []json.RawMessage{json.RawMessage(strconv.FormatUint(uint64(created.ID), 10))}); err != nil {
+		t.Fatalf("DeleteMotto reflection call error = %v", err)
+	}
+}
+
+func TestCallWebAIConfigTestReturnsSafeValidationResult(t *testing.T) {
+	configJSON, err := json.Marshal(&data.AIConfig{Name: "draft", ModelType: "chat"})
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	value, err := callWebMethod(&App{}, "TestAIConfig", []json.RawMessage{configJSON})
+	if err != nil {
+		t.Fatalf("TestAIConfig reflection call error = %v", err)
+	}
+	result, ok := value.(*models.AIConfigTestResult)
+	if !ok || result.Success || !strings.Contains(result.Message, "配置校验失败") {
+		t.Fatalf("TestAIConfig result = %#v", value)
 	}
 }
 

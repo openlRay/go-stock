@@ -10,6 +10,7 @@ import {
   GetAIModelCapabilities,
   GetAiConfigs,
   SetDefaultAIConfig,
+  TestAIConfig,
   UpdateAIConfig
 } from "../../wailsjs/go/main/App";
 import {NButton, NIcon, NSpace, NTag, NText, NTooltip, useDialog, useMessage} from "naive-ui";
@@ -24,6 +25,8 @@ const aiConfigs = ref([])
 const listLoading = ref(false)
 const submitting = ref(false)
 const actionLoadingId = ref(0)
+const testingConfigId = ref(0)
+const testingDraft = ref(false)
 const searchKeyword = ref('')
 const drawerVisible = ref(false)
 const drawerMode = ref('add')
@@ -315,7 +318,7 @@ async function fetchModelInfo(modelName) {
     }
     if (updated.length) message.success(`已读取 ${modelName}：${updated.join('，')}`)
   } catch (error) {
-    console.debug('FetchAiModelInfo failed', error)
+    // 模型信息属于可选增强；失败时保留用户手工输入，不输出可能包含上游详情的调试日志。
   }
 }
 
@@ -350,6 +353,47 @@ function buildSavePayload() {
   payload.thinking = payload.reasoningMode !== 'off'
   if (!payload.temperatureConfigured) payload.temperature = 0
   return payload
+}
+
+function showAIConfigTestResult(result, modelType) {
+  if (!result?.success) {
+    message.error(result?.message || '模型服务测试失败，请检查当前配置')
+    return
+  }
+  const typeLabel = modelType === 'embedding' ? '向量模型' : '对话模型'
+  const latency = Number.isFinite(result.latencyMillis) ? Math.max(0, result.latencyMillis) : 0
+  const preview = result.responsePreview ? `；${result.responsePreview}` : ''
+  message.success(`${typeLabel}测试成功，耗时 ${latency} ms${preview}`)
+}
+
+async function testSavedConfig(row) {
+  if (testingConfigId.value) return
+  testingConfigId.value = row.ID
+  try {
+    const payload = JSON.parse(JSON.stringify(row))
+    delete payload._key
+    const result = await TestAIConfig(payload)
+    showAIConfigTestResult(result, payload.modelType || 'chat')
+  } catch {
+    message.error('模型服务测试请求失败，请稍后重试')
+  } finally {
+    testingConfigId.value = 0
+  }
+}
+
+async function testDraftConfig() {
+  if (testingDraft.value || !editingConfig.value) return
+  testingDraft.value = true
+  try {
+    // 测试使用与保存相同的草稿序列化边界，但不会调用保存 RPC 或刷新配置列表。
+    const payload = buildSavePayload()
+    const result = await TestAIConfig(payload)
+    showAIConfigTestResult(result, payload.modelType)
+  } catch {
+    message.error('模型服务测试请求失败，请稍后重试')
+  } finally {
+    testingDraft.value = false
+  }
 }
 
 async function saveConfig() {
@@ -467,7 +511,15 @@ const columns = [
   }},
   {title: '最大 Token', key: 'maxTokens', width: 110},
   {title: '上下文窗口', key: 'contextWindow', width: 120, render: row => row.contextWindow > 0 ? row.contextWindow : '自动'},
-  {title: '操作', key: 'actions', width: 290, fixed: 'right', render: row => h(NSpace, {size: 4}, () => [
+  {title: '操作', key: 'actions', width: 350, fixed: 'right', render: row => h(NSpace, {size: 4}, () => [
+    h(NButton, {
+      size: 'small',
+      type: 'warning',
+      ghost: true,
+      loading: testingConfigId.value === row.ID,
+      disabled: testingConfigId.value !== 0 && testingConfigId.value !== row.ID,
+      onClick: () => testSavedConfig(row)
+    }, () => '测试'),
     h(NButton, {
       size: 'small',
       type: 'success',
@@ -670,6 +722,7 @@ onBeforeUnmount(() => {
         </n-spin>
         <template #footer>
           <n-space>
+            <n-button type="info" ghost :loading="testingDraft" @click="testDraftConfig">测试当前配置</n-button>
             <n-button :disabled="submitting" @click="drawerVisible = false">取消</n-button>
             <n-button type="primary" :loading="submitting" @click="saveConfig">保存</n-button>
           </n-space>

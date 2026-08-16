@@ -121,11 +121,67 @@ await UploadKBFiles(kbName, opaqueFileTokens)
 
 - 业务代码通过 `App.emit` 或 `data.EmitAppEvent` 发送事件，不直接依赖 `runtime.EventsEmit`。
 - Desktop 使用 Wails event，Web 使用同 payload 的 SSE；事件 owner 在 `backend/models` 定义 typed payload 和稳定 name/phase。
+- 表示“完成”的事件必须对应已持久化状态：数据库写回成功后才能 emit；写回失败时不得发送完成事件或触发依赖该事件的通知、刷新等旁路副作用。
 - emitter 未设置的测试环境可以安全跳过，不得 panic。
 - Web event hub 的慢或已断开 client 不能阻塞 emitter 和其他 client；关闭 hub 后 stream 正常退出。
 - 注册事件监听的消费者必须只注销自己的 callback，不能按事件名清除其他订阅者。
 
 证据：`app_events.go`、`backend/data/app_ctx.go`、`web_server_test.go`。
+
+## 场景：持久化完成后刷新任务列表
+
+### 1. Scope / Trigger
+
+后台任务执行会更新运行次数、最近执行时间或结果，而多个运行时前端需要在完成后刷新列表时适用。
+
+### 2. Signatures
+
+- Event name：`cronTaskExecuted`。
+- Payload：`CronTaskExecutedEvent{TaskID uint, Success bool, CompletedAt time.Time}`。
+- 前端 listener：接收 typed payload 后重新查询当前筛选条件下的任务列表。
+
+### 3. Contracts
+
+- 只有运行信息成功写回数据库后才能发送完成事件和完成通知；写回失败时执行入口返回失败，且不产生任何“已完成”旁路副作用。
+- Desktop Wails 与 Web SSE 共享同一 event name 和 payload；字段由 `backend/models` 定义，前端不得通过解析日志或错误字符串判断完成状态。
+- 立即执行入口等待完成事件刷新，不在 RPC 返回前后额外发起一次可能读到旧数据的查询。
+- listener 卸载时只调用注册返回的 stop callback，不按事件名清空其他消费者。
+
+### 4. Validation & Error Matrix
+
+| 条件 | 行为 |
+| --- | --- |
+| 业务执行成功且运行信息写回成功 | 发一次事件；通知开关开启时发一次完成通知 |
+| 业务执行失败但失败结果写回成功 | 发一次 `success=false` 事件，并展示安全失败摘要 |
+| 运行信息写回失败 | 不发事件、不通知、不触发列表刷新 |
+| 页面存在多个 listener | 卸载当前页面不影响其他 listener |
+
+### 5. Good / Base / Bad Cases
+
+- Good：统一执行入口完成业务与持久化后发 typed event，页面收到后刷新当前列表。
+- Base：定时触发和“立即执行”复用同一完成边界。
+- Bad：先 emit 再写库；RPC 返回后立即刷新一次，同时完成事件又刷新一次；使用全局 `EventsOff(name)`。
+
+### 6. Tests Required
+
+- emitter 回调内重新读取数据库，断言运行次数和最近执行时间已经更新。
+- 强制制造写回失败，断言事件数和通知数都为零。
+- 成功和业务失败各断言只发一个事件，payload 的任务 ID、状态和完成时间正确。
+- 前端定点验证“立即执行”后列表自动刷新，筛选条件保持不变。
+
+### 7. Wrong vs Correct
+
+```go
+// Wrong：消费者可能在数据库提交前读到旧状态。
+emit(CronTaskExecutedEventName, payload)
+saveRunInfo(task)
+
+// Correct：持久化是完成事件的前置条件。
+if err := saveRunInfo(task); err != nil {
+    return nil, err
+}
+emit(CronTaskExecutedEventName, payload)
+```
 
 ## 同源与本地开发
 
@@ -165,6 +221,52 @@ Settings.BrowserPath > CHROME_BIN > platform detection
 - `GO_STOCK_WEB_DISABLE_JOBS=1` 只用于隔离测试和 smoke，正常运行不得静默关闭后台任务。
 - Desktop/Web startup 必须分别配置事件 emitter、HTTP 设置和平台资源，测试 teardown 恢复全局 emitter。
 
+## 场景：可编辑后台任务的运行时注册表
+
+### 1. Scope / Trigger
+
+数据库任务可改名、启停或删除，运行时使用 map 保存 scheduler/timer entry 时适用。
+
+### 2. Signatures
+
+- 稳定键：`task:<immutable-id>`。
+- 注册：`schedule(task) error`；注销：`unschedule(taskID)`。
+
+### 3. Contracts
+
+注册键只能使用不可变 ID，不能拼接名称等可编辑字段。更新前先按 ID 注销旧 entry；停用和删除同时删除 scheduler entry 与注册表键；注册失败不得留下零值或失效 entry。
+
+### 4. Validation & Error Matrix
+
+| 条件 | 行为 |
+| --- | --- |
+| 任务改名 | 旧 entry 被替换，运行时仍只有一个 entry |
+| 任务停用或删除 | scheduler 与注册表均无该 ID |
+| 新 Cron 表达式注册失败 | 返回 error，不登记无效 entry |
+| 创建时 `enable=false` | 只持久化，不注册 scheduler |
+
+### 5. Good / Base / Bad Cases
+
+- Good：所有创建、更新、启停、启动恢复入口复用同一 `schedule/unschedule` helper。
+- Base：注册表仅用任务 ID，名称只用于展示和日志。
+- Bad：使用 `id + name` 作为 key，改名后无法找到旧闭包，造成重复执行和重复通知。
+
+### 6. Tests Required
+
+- 创建启用任务后 entry 数为 1；改名更新后仍为 1 且 entry ID 已替换。
+- 删除或停用后 entry 数为 0 且注册表键不存在。
+- 创建停用任务不产生 entry。
+
+### 7. Wrong vs Correct
+
+```go
+// Wrong：name 可变，更新后旧 entry 会失联。
+key := fmt.Sprintf("%d_%s", task.ID, task.Name)
+
+// Correct：只用不可变 ID 建立运行时身份。
+key := fmt.Sprintf("cron_task:%d", task.ID)
+```
+
 ## 禁止模式
 
 - Web 路径调用 `runtime.Quit`、Desktop dialog 或 updater。
@@ -181,3 +283,4 @@ Settings.BrowserPath > CHROME_BIN > platform detection
 - `GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -tags web .`：无 Desktop API 泄漏。
 - `go build .`：当前 Desktop 入口仍可编译。
 - 修改 binding 时运行生成文件一致性检查和前端 build。
+- 完成事件测试需在 emitter 内读取持久化状态，并强制制造一次写回失败，分别证明“先写库再发事件”和“写库失败无完成副作用”。

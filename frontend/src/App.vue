@@ -21,7 +21,7 @@ import {
   ChatbubblesOutline,
   NewspaperOutline,
   NewspaperSharp, Notifications,
-  PowerOutline, Pulse,
+  PersonCircleOutline, PowerOutline, Pulse,
   ReorderTwoOutline,
   SettingsOutline, ServerOutline, Skull, SkullOutline, SkullSharp,
   SparklesOutline, FlashOutline, Star,
@@ -1093,6 +1093,22 @@ const menuOptions = ref([
         ),
     key: 'about',
     icon: renderIcon(LogoGithub),
+    show: true,
+  },
+  {
+    label: () =>
+        h(
+            RouterLink,
+            {
+              to: { name: 'my' },
+              onClick: () => {
+                activeKey.value = 'my'
+              },
+            },
+            {default: () => '我的'}
+        ),
+    key: 'my',
+    icon: renderIcon(PersonCircleOutline),
     show: true,
   },
   {

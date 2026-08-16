@@ -1,0 +1,9 @@
+{"file":".trellis/spec/backend/database-guidelines.md","reason":"实现 additive migration、显式零值更新和内存 SQLite 测试"}
+{"file":".trellis/spec/backend/ai-integration-guidelines.md","reason":"实现 AI 润色配置、thinking override 和模型输出校验"}
+{"file":".trellis/spec/backend/runtime-guidelines.md","reason":"实现 App RPC、Web allowlist 与生成 binding"}
+{"file":".trellis/spec/backend/error-handling.md","reason":"实现安全 RPC 错误和通知失败隔离"}
+{"file":".trellis/spec/backend/logging-guidelines.md","reason":"约束异步渠道日志和模型内容"}
+{"file":".trellis/spec/frontend/architecture-guidelines.md","reason":"实现动态路由和我的页面"}
+{"file":".trellis/spec/frontend/dialog-guidelines.md","reason":"复用 AppModalShell 实现格言编辑器"}
+{"file":".trellis/spec/frontend/quality-guidelines.md","reason":"处理异步草稿竞态并选择前端 build 验证"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"核对模型、RPC、binding 和 UI 字段往返"}

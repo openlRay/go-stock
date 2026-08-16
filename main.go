@@ -294,6 +294,7 @@ func AutoMigrate() {
 	db.Dao.AutoMigrate(&models.AiRecommendStocks{})
 	db.Dao.AutoMigrate(&models.AllStockInfo{})
 	db.Dao.AutoMigrate(&models.CronTask{})
+	db.Dao.AutoMigrate(&models.Motto{})
 	db.Dao.AutoMigrate(&models.AiAssistantSession{})
 	db.Dao.AutoMigrate(&models.GlobalStockIndex{})
 	db.Dao.AutoMigrate(&data.TradingRecord{})

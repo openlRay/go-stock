@@ -158,6 +158,10 @@ export function CreateMCPServer(arg1) {
   return window['go']['main']['App']['CreateMCPServer'](arg1);
 }
 
+export function CreateMotto(arg1) {
+  return window['go']['main']['App']['CreateMotto'](arg1);
+}
+
 export function CreateSkill(arg1) {
   return window['go']['main']['App']['CreateSkill'](arg1);
 }
@@ -216,6 +220,10 @@ export function DeleteKnowledgeBase(arg1) {
 
 export function DeleteMCPServer(arg1) {
   return window['go']['main']['App']['DeleteMCPServer'](arg1);
+}
+
+export function DeleteMotto(arg1) {
+  return window['go']['main']['App']['DeleteMotto'](arg1);
 }
 
 export function DeletePromptTemplate(arg1) {
@@ -598,6 +606,10 @@ export function GetMoneyRankSina(arg1) {
   return window['go']['main']['App']['GetMoneyRankSina'](arg1);
 }
 
+export function GetMottos() {
+  return window['go']['main']['App']['GetMottos']();
+}
+
 export function GetPromptTemplateList(arg1) {
   return window['go']['main']['App']['GetPromptTemplateList'](arg1);
 }
@@ -914,6 +926,10 @@ export function PickKBFilePaths() {
   return window['go']['main']['App']['PickKBFilePaths']();
 }
 
+export function PolishMotto(arg1) {
+  return window['go']['main']['App']['PolishMotto'](arg1);
+}
+
 export function PromptPlazaRequest(arg1, arg2, arg3, arg4, arg5, arg6) {
   return window['go']['main']['App']['PromptPlazaRequest'](arg1, arg2, arg3, arg4, arg5, arg6);
 }
@@ -1118,6 +1134,10 @@ export function SummaryStockNews(arg1, arg2, arg3, arg4, arg5, arg6, arg7) {
   return window['go']['main']['App']['SummaryStockNews'](arg1, arg2, arg3, arg4, arg5, arg6, arg7);
 }
 
+export function TestAIConfig(arg1) {
+  return window['go']['main']['App']['TestAIConfig'](arg1);
+}
+
 export function TestMCPServer(arg1) {
   return window['go']['main']['App']['TestMCPServer'](arg1);
 }
@@ -1172,6 +1192,10 @@ export function UpdateGroupSort(arg1, arg2) {
 
 export function UpdateMCPServer(arg1) {
   return window['go']['main']['App']['UpdateMCPServer'](arg1);
+}
+
+export function UpdateMotto(arg1, arg2) {
+  return window['go']['main']['App']['UpdateMotto'](arg1, arg2);
 }
 
 export function UpdatePromptTemplate(arg1) {

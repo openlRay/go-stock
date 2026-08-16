@@ -2466,7 +2466,8 @@ onBeforeUnmount(() => {
 </style>
 
 <style>
-body > div:has(.n-select-menu) {
+/* 只提升助手挂到 body 的下拉浮层，避免把包含 n-select-menu 的业务弹框整体抬到 10002。 */
+body > .v-binder-follower-container:has(.n-select-menu) {
   z-index: 10002 !important;
 }
 

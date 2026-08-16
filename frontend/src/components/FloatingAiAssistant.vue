@@ -1347,9 +1347,9 @@ watch(aiConfigId, (newId) => {
   transform: translateX(0);
 }
 </style>
-<!-- 下拉挂载到 body 时需提高 z-index，否则会被抽屉遮挡 -->
+<!-- 只提升直接挂载到 body 的下拉浮层；宽泛的 :has 选择器会误抬升包含普通下拉框的整个弹框。 -->
 <style>
-body > div:has(.n-select-menu) {
+body > .v-binder-follower-container:has(.n-select-menu) {
   z-index: 10002 !important;
 }
 </style>

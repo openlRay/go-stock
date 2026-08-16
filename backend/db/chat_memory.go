@@ -62,17 +62,25 @@ func ClearChatMemory(sessionID string) error {
 	return Dao.Where("session_id = ?", sessionID).Delete(&ChatMemory{}).Error
 }
 
-func AutoMigrate() {
-	Dao.AutoMigrate(&ChatMemory{})
-	Dao.AutoMigrate(&models.StockChangeHistory{})
-	Dao.AutoMigrate(&models.MarketStatistic{})
-	Dao.AutoMigrate(&models.StockTransactionCache{})
-	Dao.AutoMigrate(&models.StockTransactionCacheMeta{})
-	Dao.AutoMigrate(&models.AgentFeedback{})
-	Dao.AutoMigrate(&models.AiRecommendBacktest{})
-	if err := migrateAIConfigDefault(); err != nil {
-		fmt.Printf("migrate default AI config failed: %v\n", err)
+func AutoMigrate() error {
+	// Cron 调度在应用启动阶段就会读取任务；必须在 db.Init 返回前完成相关 schema 迁移。
+	if err := Dao.AutoMigrate(
+		&ChatMemory{},
+		&models.StockChangeHistory{},
+		&models.MarketStatistic{},
+		&models.StockTransactionCache{},
+		&models.StockTransactionCacheMeta{},
+		&models.AgentFeedback{},
+		&models.AiRecommendBacktest{},
+		&models.CronTask{},
+		&models.Motto{},
+	); err != nil {
+		return fmt.Errorf("同步数据库表结构失败: %w", err)
 	}
+	if err := migrateAIConfigDefault(); err != nil {
+		return fmt.Errorf("迁移默认 AI 配置失败: %w", err)
+	}
+	return nil
 }
 
 type aiConfigDefaultMigration struct {

@@ -17,7 +17,7 @@
         <n-select
           v-model:value="filterTaskType"
           :options="taskTypeOptions"
-          placeholder="任务类型"
+          placeholder="全部任务类型"
           style="width: 140px"
           clearable
         />
@@ -25,7 +25,7 @@
         <n-select
           v-model:value="filterStatus"
           :options="statusOptions"
-          placeholder="任务状态"
+          placeholder="全部状态"
           style="width: 120px"
           clearable
         />
@@ -295,6 +295,9 @@
           </n-card>
           
           <!-- 其他任务类型仍使用文本输入框 -->
+          <n-alert v-else-if="formData.taskType === 'motto_push'" type="info" :bordered="false">
+            每次执行会从“我的 → 格言”随机选择最多三条并合并推送，无需额外参数。
+          </n-alert>
           <n-input
             v-else
             v-model:value="formData.params"
@@ -314,6 +317,22 @@
             show-count
             maxlength="500"
           />
+        </n-form-item>
+
+        <n-form-item label="执行完成后推送" path="notifyOnCompletion">
+          <div class="notification-setting-field">
+            <n-switch
+              v-model:value="formData.notifyOnCompletion"
+              size="large"
+              :disabled="formData.taskType === 'motto_push'"
+            >
+              <template #checked>开启</template>
+              <template #unchecked>关闭</template>
+            </n-switch>
+            <n-text v-if="formData.taskType === 'motto_push'" depth="3" style="font-size: 12px">
+              “推送格言”任务必须推送执行结果，因此该开关已自动开启。
+            </n-text>
+          </div>
         </n-form-item>
 
         <n-form-item label="启用状态" path="enable">
@@ -396,8 +415,8 @@ const submitting = ref(false)
 const showCreateModal = ref(false)
 const editingTask = ref(false)
 const searchKeyword = ref('')
-const filterTaskType = ref('')
-const filterStatus = ref('')
+const filterTaskType = ref(null)
+const filterStatus = ref(null)
 const currentPage = ref(1)
 const pageSize = ref(10)
 const total = ref(0)
@@ -413,6 +432,7 @@ const formData = reactive({
   target: '',
   params: '',
   enable: true,
+  notifyOnCompletion: false,
   status: 'active',
   description: ''
 })
@@ -455,7 +475,7 @@ const generatedParamsJson = computed(() => {
       agentMode: marketAnalysisParamsData.agentMode
     }, null, 2)
   }
-
+  return formData.params || ''
 })
 
 // 股票分析参数
@@ -554,6 +574,16 @@ const columns = [
     render(row) {
       return h(NTag, { type: row.enable ? 'success' : 'error' }, {
         default: () => (row.enable ? '是' : '否')
+      })
+    }
+  },
+  {
+    title: '结果推送',
+    key: 'notifyOnCompletion',
+    width: 90,
+    render(row) {
+      return h(NTag, { type: row.notifyOnCompletion ? 'success' : 'default' }, {
+        default: () => (row.notifyOnCompletion ? '开启' : '关闭')
       })
     }
   },
@@ -711,6 +741,8 @@ const loadTaskTypes = async () => {
 // 加载 AI 配置
 const aiConfigOptions=ref([])
 let stopAIConfigsChangedListener = () => {}
+let stopCronTaskExecutedListener = () => {}
+const cronTaskExecutedEventName = 'cronTaskExecuted'
 const loadAiConfigs = async () => {
   try {
     const configs = await GetAiConfigs()
@@ -757,8 +789,8 @@ const loadTaskList = async () => {
       page: currentPage.value,
       pageSize: pageSize.value,
       name: searchKeyword.value,
-      taskType: filterTaskType.value,
-      status: filterStatus.value
+      taskType: filterTaskType.value ?? '',
+      status: filterStatus.value ?? ''
     }
     
     const result = await GetCronTaskList(query)
@@ -802,6 +834,12 @@ const handleExecute = async (row) => {
   }
 }
 
+// 立即执行只返回“已启动”；列表必须等后端完成持久化事件后再刷新。
+const handleCronTaskExecuted = (event) => {
+  if (!event?.taskId) return
+  loadTaskList()
+}
+
 // 切换启用状态
 const handleToggleEnable = async (row) => {
   try {
@@ -830,7 +868,6 @@ const handleEdit = async (row) => {
   editingTask.value = true
   try {
     const task = await GetCronTaskByID(row.id)
-    console.log("task",task)
     if (task) {
       // 先重置表单和 Cron 配置器
       resetForm()
@@ -844,10 +881,10 @@ const handleEdit = async (row) => {
       formData.target = task.target
       formData.params = task.params
       formData.enable = task.enable
+      formData.notifyOnCompletion = task.notifyOnCompletion === true
       formData.status = task.status
       formData.description = task.description
       
-      console.log("task.params",task.params)
       // 如果是股票分析任务，解析参数到表单
       if (task.taskType === 'stock_analysis' && task.params) {
         try {
@@ -1006,6 +1043,7 @@ const resetForm = () => {
     target: '',
     params: '',
     enable: true,
+    notifyOnCompletion: false,
     status: 'active',
     description: ''
   })
@@ -1037,6 +1075,9 @@ const taskList = ref([])
 
 // 监听任务类型变化，重置参数
 watch(() => formData.taskType, (newType) => {
+  if (newType === 'motto_push') {
+    formData.notifyOnCompletion = true
+  }
   if (newType === 'stock_analysis') {
     // 如果是股票分析任务，尝试解析现有参数
     if (formData.params) {
@@ -1059,11 +1100,27 @@ watch(() => formData.taskType, (newType) => {
 // 初始化
 onMounted(async () => {
   stopAIConfigsChangedListener = EventsOn('aiConfigsChanged', loadAiConfigs)
+  stopCronTaskExecutedListener = EventsOn(cronTaskExecutedEventName, handleCronTaskExecuted)
   await loadTaskTypes()
   await loadAiConfigs()
   await loadPromptTemplates()
   await loadTaskList()
 })
 
-onBeforeUnmount(() => stopAIConfigsChangedListener())
+onBeforeUnmount(() => {
+  stopAIConfigsChangedListener()
+  stopCronTaskExecutedListener()
+})
 </script>
+
+<style scoped>
+.notification-setting-field {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  text-align: left;
+}
+</style>

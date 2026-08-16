@@ -85,6 +85,8 @@ export function CreateKnowledgeBase(arg1:string,arg2:string,arg3:number,arg4:str
 
 export function CreateMCPServer(arg1:models.MCPServer):Promise<string>;
 
+export function CreateMotto(arg1:string):Promise<models.Motto>;
+
 export function CreateSkill(arg1:models.Skill):Promise<string>;
 
 export function DelPrompt(arg1:number):Promise<string>;
@@ -114,6 +116,8 @@ export function DeleteKBGraph(arg1:string):Promise<void>;
 export function DeleteKnowledgeBase(arg1:string):Promise<void>;
 
 export function DeleteMCPServer(arg1:number):Promise<string>;
+
+export function DeleteMotto(arg1:number):Promise<void>;
 
 export function DeletePromptTemplate(arg1:number):Promise<string>;
 
@@ -305,6 +309,8 @@ export function GetMarketStatisticByDate(arg1:string):Promise<Array<models.Marke
 
 export function GetMoneyRankSina(arg1:string):Promise<Array<Record<string, any>>>;
 
+export function GetMottos():Promise<Array<models.Motto>>;
+
 export function GetPromptTemplateList(arg1:models.PromptTemplateQuery):Promise<models.PromptTemplatePageData>;
 
 export function GetPromptTemplates(arg1:string,arg2:string):Promise<any>;
@@ -463,6 +469,8 @@ export function PickKBFilePath():Promise<string>;
 
 export function PickKBFilePaths():Promise<Array<string>>;
 
+export function PolishMotto(arg1:agent.MottoPolishRequest):Promise<agent.MottoPolishResult>;
+
 export function PromptPlazaRequest(arg1:string,arg2:string,arg3:string,arg4:Record<string, any>,arg5:string,arg6:string):Promise<Record<string, any>>;
 
 export function QuitApp():Promise<void>;
@@ -565,6 +573,8 @@ export function SubmitAgentFeedback(arg1:models.AgentFeedback):Promise<void>;
 
 export function SummaryStockNews(arg1:string,arg2:number,arg3:any,arg4:boolean,arg5:boolean,arg6:string,arg7:string):Promise<void>;
 
+export function TestAIConfig(arg1:data.AIConfig):Promise<models.AIConfigTestResult>;
+
 export function TestMCPServer(arg1:number):Promise<string>;
 
 export function UnFollow(arg1:string):Promise<string>;
@@ -592,6 +602,8 @@ export function UpdateGroup(arg1:number,arg2:string):Promise<string>;
 export function UpdateGroupSort(arg1:number,arg2:number):Promise<boolean>;
 
 export function UpdateMCPServer(arg1:models.MCPServer):Promise<string>;
+
+export function UpdateMotto(arg1:number,arg2:string):Promise<models.Motto>;
 
 export function UpdatePromptTemplate(arg1:models.PromptTemplate):Promise<string>;
 

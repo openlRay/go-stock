@@ -60,6 +60,7 @@ type App struct {
 	priceAtAlertReset  map[string]float64
 	feishuBotMu        sync.Mutex
 	feishuBot          *agent.FeishuBot
+	cronResultPusher   cronTaskResultPusher
 }
 
 // NewApp creates a new App application struct
@@ -3129,6 +3130,48 @@ func (a *App) FetchAiModelInfo(baseUrl, apiKey, modelName, extraHeaders string) 
 	return info
 }
 
+func cronTaskEntryKey(id uint) string {
+	return fmt.Sprintf("cron_task:%d", id)
+}
+
+func logCronTaskExecutionFailure(task *models.CronTask, err error) {
+	if task == nil || err == nil {
+		return
+	}
+	// 执行错误可能包含第三方响应正文；运行日志只保留稳定任务标识和错误类型。
+	logger.SugaredLogger.Errorf("定时任务执行失败，task_id=%d task_type=%s error_type=%T", task.ID, task.TaskType, err)
+}
+
+func (a *App) unscheduleCronTask(id uint) {
+	key := cronTaskEntryKey(id)
+	if entryID, exists := a.getCronEntry(key); exists {
+		a.cron.Remove(entryID)
+		a.removeCronEntry(key)
+	}
+}
+
+func (a *App) scheduleCronTask(task *models.CronTask) error {
+	if task == nil || task.ID == 0 {
+		return fmt.Errorf("无效的定时任务")
+	}
+	// 注册表使用稳定任务 ID，避免任务改名后旧闭包残留并重复推送。
+	a.unscheduleCronTask(task.ID)
+	if !task.Enable {
+		return nil
+	}
+	taskCopy := *task
+	entryID, err := a.cron.AddFunc(taskCopy.CronExpr, func() {
+		if err := a.executeCronTask(&taskCopy); err != nil {
+			logCronTaskExecutionFailure(&taskCopy, err)
+		}
+	})
+	if err != nil {
+		return err
+	}
+	a.setCronEntry(cronTaskEntryKey(taskCopy.ID), entryID)
+	return nil
+}
+
 // InitCronTasks 在应用启动时，自动为启用状态的定时任务创建调度
 func (a *App) InitCronTasks() {
 	cronApi := agent.NewCronTaskApi()
@@ -3154,18 +3197,9 @@ func (a *App) InitCronTasks() {
 	}
 	for _, t := range tasks {
 		taskCopy := t
-		entryID, err := a.cron.AddFunc(taskCopy.CronExpr, func() {
-			err := agent.NewCronTaskApi().ExecuteTask(a.ctx, &taskCopy)
-			if err != nil {
-				logger.SugaredLogger.Errorf("启动任务失败：%v %s", err, taskCopy.Name)
-				return
-			}
-		})
-		if err != nil {
+		if err := a.scheduleCronTask(&taskCopy); err != nil {
 			logger.SugaredLogger.Errorf("自动创建定时任务失败：%v %s", err, taskCopy.Name)
-			continue
 		}
-		a.setCronEntry(convertor.ToString(taskCopy.ID)+"_"+taskCopy.Name, entryID)
 	}
 }
 
@@ -3190,16 +3224,7 @@ func (a *App) CreateCronTask(task *models.CronTask) string {
 	if err != nil {
 		return fmt.Sprintf("创建失败：%v", err)
 	}
-	taskCopy := *task
-	entryID, err := a.cron.AddFunc(taskCopy.CronExpr, func() {
-		err := agent.NewCronTaskApi().ExecuteTask(a.ctx, &taskCopy)
-		if err != nil {
-			logger.SugaredLogger.Errorf("执行任务失败：%v %s", err, taskCopy.Name)
-			return
-		}
-	})
-	a.setCronEntry(convertor.ToString(task.ID)+"_"+task.Name, entryID)
-	if err != nil {
+	if err := a.scheduleCronTask(task); err != nil {
 		return "任务创建成功,但定时失败"
 	}
 	return "创建成功"
@@ -3210,19 +3235,7 @@ func (a *App) UpdateCronTask(task *models.CronTask) string {
 	if err != nil {
 		return fmt.Sprintf("更新失败：%v", err)
 	}
-	if entryID, exists := a.getCronEntry(convertor.ToString(task.ID) + "_" + task.Name); exists {
-		a.cron.Remove(entryID)
-	}
-	taskCopy := *task
-	entryID, err := a.cron.AddFunc(taskCopy.CronExpr, func() {
-		err := agent.NewCronTaskApi().ExecuteTask(a.ctx, &taskCopy)
-		if err != nil {
-			logger.SugaredLogger.Errorf("执行任务失败：%v %s", err, taskCopy.Name)
-			return
-		}
-	})
-	a.setCronEntry(convertor.ToString(task.ID)+"_"+task.Name, entryID)
-	if err != nil {
+	if err := a.scheduleCronTask(task); err != nil {
 		return fmt.Sprintf("更新失败：%v", err)
 	}
 	return "更新成功"
@@ -3235,16 +3248,10 @@ func (a *App) UpdateCronTask(task *models.CronTask) string {
 //	@param id 任务 ID
 //	@return string 操作结果
 func (a *App) DeleteCronTask(id uint) string {
-	err := agent.NewCronTaskApi().Delete(id)
-	task, err := agent.NewCronTaskApi().GetByID(id)
-	if err == nil {
-		if entryID, exists := a.getCronEntry(convertor.ToString(id) + "_" + task.Name); exists {
-			a.cron.Remove(entryID)
-		}
-	}
-	if err != nil {
+	if err := agent.NewCronTaskApi().Delete(id); err != nil {
 		return fmt.Sprintf("删除失败：%v", err)
 	}
+	a.unscheduleCronTask(id)
 	return "删除成功"
 }
 
@@ -3277,30 +3284,15 @@ func (a *App) GetCronTaskList(query *models.CronTaskQuery) *models.CronTaskPageR
 //	@Description: 启用/禁用定时任务
 //	@receiver a
 func (a *App) EnableCronTask(id uint, enable bool) string {
-	err := agent.NewCronTaskApi().EnableTask(id, enable)
-	task, err := agent.NewCronTaskApi().GetByID(id)
-	if err == nil {
-		if entryID, exists := a.getCronEntry(convertor.ToString(id) + "_" + task.Name); exists {
-			a.cron.Remove(entryID)
-		}
-		if enable {
-			taskCopy := *task
-			entryID, err := a.cron.AddFunc(taskCopy.CronExpr, func() {
-				err := agent.NewCronTaskApi().ExecuteTask(a.ctx, &taskCopy)
-				if err != nil {
-					logger.SugaredLogger.Errorf("%s 执行任务失败：%v", taskCopy.Name, err)
-					return
-				}
-			})
-			a.setCronEntry(convertor.ToString(id)+"_"+task.Name, entryID)
-			if err != nil {
-				return "操作成功,但定时失败"
-			}
-		}
-
+	if err := agent.NewCronTaskApi().EnableTask(id, enable); err != nil {
+		return fmt.Sprintf("操作失败：%v", err)
 	}
+	task, err := agent.NewCronTaskApi().GetByID(id)
 	if err != nil {
 		return fmt.Sprintf("操作失败：%v", err)
+	}
+	if err := a.scheduleCronTask(task); err != nil {
+		return "操作成功,但定时失败"
 	}
 	return "操作成功"
 }
@@ -3318,9 +3310,9 @@ func (a *App) ExecuteCronTaskNow(id uint) string {
 	}
 
 	go func() {
-		err := agent.NewCronTaskApi().ExecuteTask(a.ctx, task)
+		err := a.executeCronTask(task)
 		if err != nil {
-			logger.SugaredLogger.Errorf("执行任务失败：%v %s", err, task.Name)
+			logCronTaskExecutionFailure(task, err)
 		}
 	}()
 

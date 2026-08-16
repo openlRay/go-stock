@@ -34,6 +34,14 @@ func normalizeChatModelBaseURL(base string) string {
 	return strings.TrimSuffix(base, "/chat/completions")
 }
 
+func safeAIEndpointHost(base string) string {
+	parsed, err := url.Parse(strings.TrimSpace(base))
+	if err != nil {
+		return ""
+	}
+	return parsed.Hostname()
+}
+
 func parseAccessSecret(apiKey string) (ak, sk string) {
 	s := strings.TrimSpace(apiKey)
 	if s == "" {
@@ -99,7 +107,7 @@ func createChatModel(ctx context.Context, aiConfig data.AIConfig) (model.ToolCal
 	outputMaxTokens := &maxTok
 
 	p := effective.Provider
-	logger.SugaredLogger.Infof("createChatModel provider=%s base=%q model=%q", p, aiConfig.BaseUrl, aiConfig.ModelName)
+	logger.SugaredLogger.Infof("createChatModel provider=%s host=%q model=%q", p, safeAIEndpointHost(aiConfig.BaseUrl), aiConfig.ModelName)
 
 	switch p {
 	case data.AIProviderVolcArk:
@@ -396,7 +404,7 @@ func buildChatModelHTTPClient(timeout time.Duration, config data.AIConfig) *http
 	if hasProxy {
 		proxyURL, err := url.Parse(config.HttpProxy)
 		if err != nil {
-			logger.SugaredLogger.Warnf("解析HTTP代理失败: %v", err)
+			logger.SugaredLogger.Warnf("解析 HTTP 代理失败，model=%q", config.ModelName)
 		} else {
 			if base, ok := http.DefaultTransport.(*http.Transport); ok {
 				proxyTransport := base.Clone()

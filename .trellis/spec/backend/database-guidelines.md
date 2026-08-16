@@ -59,6 +59,53 @@
 - 返回 slice 时保持稳定排序；需要倒序读取再正序展示时，在拥有查询语义的层完成转换。
 - 不把 GORM error 文本直接作为前端协议；在 App/RPC 边界转换为用户安全错误。
 
+## 场景：`default:true` 布尔字段的显式关闭
+
+### 1. Scope / Trigger
+
+持久化 model 使用 `gorm:"default:true"`，同时创建 API 允许调用方显式传入 `false` 时适用。
+
+### 2. Signatures
+
+- DB 字段：`enable BOOLEAN NOT NULL DEFAULT TRUE`。
+- 创建输入：`Enable bool`，其中 `false` 是有效业务值，不得解释为“未提供”。
+
+### 3. Contracts
+
+GORM 创建带默认值 tag 的 struct 时可能把 Go 零值替换为数据库默认值。创建 service 必须通过 pointer/独立 configured 标记、显式字段 map，或同一事务内的显式列写入保存 `false`；返回给调用方的 model 也必须与数据库一致。
+
+### 4. Validation & Error Matrix
+
+| 条件 | 行为 |
+| --- | --- |
+| 调用方显式传 `false` | 数据库保存 `false`，后续依赖该开关的副作用不启动 |
+| 显式零值写入失败 | 整个创建事务回滚并返回带 cause 的 error |
+| 字段确实需要“未提供”语义 | 改用 `*bool` 或单独 configured 字段，不用零值猜测 |
+
+### 5. Good / Base / Bad Cases
+
+- Good：事务创建后显式写入 `false`，并把 struct 字段恢复为 `false`。
+- Base：使用 `*bool` 区分未提供与关闭。
+- Bad：直接 `Create(&model{Enable:false})` 并假设 `default:true` 不会覆盖零值。
+
+### 6. Tests Required
+
+- 内存 SQLite 创建 `false`，同时断言输入对象和重新读取记录均为 `false`。
+- 模拟第二步写入失败时断言没有残留创建记录。
+
+### 7. Wrong vs Correct
+
+```go
+// Wrong：default:true 可能把 false 改成 true。
+db.Create(&task)
+
+// Correct：在同一事务中明确保存调用方拥有的零值。
+db.Transaction(func(tx *gorm.DB) error {
+    if err := tx.Create(&task).Error; err != nil { return err }
+    return tx.Model(&task).UpdateColumn("enable", false).Error
+})
+```
+
 ## 测试隔离
 
 - 数据库单元测试使用独立内存 SQLite DSN，并对同名测试启用独立 cache key。

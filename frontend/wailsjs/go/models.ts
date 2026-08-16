@@ -776,6 +776,32 @@ export namespace agent {
 	        this.similarity = source["similarity"];
 	    }
 	}
+	export class MottoPolishRequest {
+	    content: string;
+	    aiConfigId: number;
+
+	    static createFrom(source: any = {}) {
+	        return new MottoPolishRequest(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.content = source["content"];
+	        this.aiConfigId = source["aiConfigId"];
+	    }
+	}
+	export class MottoPolishResult {
+	    content: string;
+
+	    static createFrom(source: any = {}) {
+	        return new MottoPolishResult(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.content = source["content"];
+	    }
+	}
 
 	export class UnifiedKnowledgeHit {
 	    sourceType: string;
@@ -3165,6 +3191,24 @@ export namespace main {
 
 export namespace models {
 
+	export class AIConfigTestResult {
+	    success: boolean;
+	    message: string;
+	    latencyMillis: number;
+	    responsePreview?: string;
+
+	    static createFrom(source: any = {}) {
+	        return new AIConfigTestResult(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.success = source["success"];
+	        this.message = source["message"];
+	        this.latencyMillis = source["latencyMillis"];
+	        this.responsePreview = source["responsePreview"];
+	    }
+	}
 	export class AIResponseResult {
 	    ID: number;
 	    // Go type: time
@@ -4059,6 +4103,7 @@ export namespace models {
 	    target: string;
 	    params: string;
 	    enable: boolean;
+	    notifyOnCompletion: boolean;
 	    // Go type: time
 	    lastRunAt?: any;
 	    // Go type: time
@@ -4083,6 +4128,7 @@ export namespace models {
 	        this.target = source["target"];
 	        this.params = source["params"];
 	        this.enable = source["enable"];
+	        this.notifyOnCompletion = source["notifyOnCompletion"];
 	        this.lastRunAt = this.convertValues(source["lastRunAt"], null);
 	        this.nextRunAt = this.convertValues(source["nextRunAt"], null);
 	        this.runCount = source["runCount"];
@@ -4576,6 +4622,44 @@ export namespace models {
 	        this.szUpCount = source["szUpCount"];
 	        this.szDownCount = source["szDownCount"];
 	        this.createdAt = this.convertValues(source["createdAt"], null);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class Motto {
+	    id: number;
+	    // Go type: time
+	    createdAt: any;
+	    // Go type: time
+	    updatedAt: any;
+	    content: string;
+
+	    static createFrom(source: any = {}) {
+	        return new Motto(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.createdAt = this.convertValues(source["createdAt"], null);
+	        this.updatedAt = this.convertValues(source["updatedAt"], null);
+	        this.content = source["content"];
 	    }
 
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
