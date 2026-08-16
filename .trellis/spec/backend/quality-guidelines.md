@@ -58,6 +58,73 @@ Go 从被测 package 目录内发现 `_test.go`。`foo_test.go` 与 `foo.go` 同
 
 不要把单 package 测试描述为全仓测试，也不要把 build 成功描述成交互回归。
 
+## Trellis task 归档提交契约
+
+### 1. 适用范围 / 触发
+
+任何将 `.trellis/tasks/<task-name>/` 移入 `.trellis/tasks/archive/<year-month>/` 的操作都适用。目标是保留可审查的 task 历史，同时避免没有独立语义的归档专用 commit。
+
+### 2. 命令签名
+
+```bash
+python3 ./.trellis/scripts/task.py archive <task-name> --no-commit
+python3 ./.trellis/scripts/add_session.py --title "<title>" --commit "<hashes>" --summary "<summary>" --no-commit
+git add -- <精确的归档、journal、spec/workflow 收尾路径>
+git commit -m "chore(trellis): <本轮收尾说明>"
+```
+
+项目工作流不得省略两个脚本的 `--no-commit`，也不得依赖脚本自动创建归档或 journal commit。
+
+### 3. 契约
+
+- `task.py archive ... --no-commit` 负责把 task 标记为 `completed`、写入完成时间、移动目录并清理指向它的 session runtime pointer，但不触碰 Git index 或创建 commit。
+- 归档移动必须与同轮 journal，或相关的 spec、workflow、task 元数据等收尾改动合并为一个 wrap-up commit；禁止 archive-only commit。
+- 批量归档时，可以把所有已确认 task 的移动与同一轮规则/收尾改动放入一个 commit。
+- 产品代码通常先按 Phase 3.4 独立提交；无关 dirty/staged 路径不得进入 wrap-up commit。
+- 只允许 `git add -- <精确路径>`，禁止 `git add .`、`git add -A` 或强制加入整个 `.trellis/`。
+
+### 4. 校验与错误矩阵
+
+| 条件 | 处理 |
+| --- | --- |
+| 归档前存在无关 dirty/staged 文件 | 明确列出并排除；无法安全区分时停止提交 |
+| `task.py archive` 任一命令失败 | 不继续提交，检查 task 是否发生部分移动 |
+| staged diff 出现未确认路径 | 停止，不创建 commit |
+| 只有归档移动、没有 journal 或相关收尾改动 | 补齐本轮 journal/收尾上下文后再提交，不创建 archive-only commit |
+| 归档后 task 仍在 active tree 或状态不是 `completed` | 视为失败，修复前不提交 |
+
+### 5. Good / Base / Bad Cases
+
+- Good：批量归档多个已完成 task，并把归档移动、finish-work 规则与 spec 更新放入一个 `chore(trellis)` commit。
+- Base：单个 task 归档与本轮 journal 使用两个 `--no-commit` 命令生成，再一起提交。
+- Bad：运行不带 `--no-commit` 的 `task.py archive`，或创建只包含 `.trellis/tasks/archive/**` 的 commit。
+
+### 6. 必需验证
+
+- 归档命令执行前后记录 `git rev-parse HEAD`，确认合并提交前 HEAD 未变化。
+- 确认 active task 列表为空或只剩明确不归档的 task。
+- 确认每个目标目录位于对应月份的 archive 下，且 `task.json.status == "completed"`。
+- 提交前运行 `git diff --cached --name-status` 与 `git diff --cached --check`，断言路径范围准确且无空白错误。
+- 此类纯 Trellis 文档/元数据改动默认不运行产品代码测试。
+
+### 7. Wrong vs Correct
+
+#### Wrong
+
+```bash
+python3 ./.trellis/scripts/task.py archive 08-16-example
+# 脚本立即产生 chore(task): archive ... 专用 commit
+```
+
+#### Correct
+
+```bash
+python3 ./.trellis/scripts/task.py archive 08-16-example --no-commit
+python3 ./.trellis/scripts/add_session.py --title "Example" --commit "abc1234" --summary "完成 Example" --no-commit
+git add -- .trellis/tasks/08-16-example .trellis/tasks/archive/2026-08/08-16-example ".trellis/workspace/<developer>/journal-N.md" ".trellis/workspace/<developer>/index.md"
+git commit -m "chore(trellis): archive example and record session"
+```
+
 ## 禁止模式
 
 - 只断言自己刚构造的 mock 值，测试不经过生产逻辑。
