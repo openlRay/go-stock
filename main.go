@@ -27,7 +27,9 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
-//go:embed frontend/dist
+// all: ensures Vite chunks whose names start with '_' or '.' are included.
+//
+//go:embed all:frontend/dist
 var assets embed.FS
 
 //go:embed build/appicon.png

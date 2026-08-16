@@ -672,7 +672,19 @@ func (a *webAPI) serveSPA(w http.ResponseWriter, r *http.Request) {
 		name = "index.html"
 	}
 	if info, err := fs.Stat(a.staticFS, name); err == nil && !info.IsDir() {
+		if name == "index.html" {
+			setWebIndexCacheHeaders(w)
+		} else if strings.HasPrefix(name, "assets/") {
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		}
 		http.FileServer(http.FS(a.staticFS)).ServeHTTP(w, r)
+		return
+	}
+	// Vite assets use content hashes and must never fall through to index.html.
+	// Returning HTML with status 200 makes browsers report a misleading dynamic
+	// import failure instead of the actual missing-file error.
+	if strings.HasPrefix(name, "assets/") {
+		http.NotFound(w, r)
 		return
 	}
 	index, err := fs.ReadFile(a.staticFS, "index.html")
@@ -680,8 +692,15 @@ func (a *webAPI) serveSPA(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "前端资源不可用", http.StatusInternalServerError)
 		return
 	}
+	setWebIndexCacheHeaders(w)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, _ = w.Write(index)
+}
+
+func setWebIndexCacheHeaders(w http.ResponseWriter) {
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
+	w.Header().Set("Pragma", "no-cache")
+	w.Header().Set("Expires", "0")
 }
 
 func writeWebJSON(w http.ResponseWriter, status int, payload any) {

@@ -10,6 +10,7 @@ import (
 	"go-stock/backend/data"
 	"go-stock/backend/db"
 	"go-stock/backend/models"
+	"io/fs"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -19,6 +20,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/glebarez/sqlite"
@@ -29,6 +31,56 @@ type webTestUploadFile struct {
 	fieldName string
 	fileName  string
 	content   []byte
+}
+
+func TestEmbeddedFrontendIncludesLeadingUnderscoreAssets(t *testing.T) {
+	matches, err := fs.Glob(assets, "frontend/dist/assets/_commonjsHelpers-*.js")
+	if err != nil {
+		t.Fatalf("fs.Glob() error = %v", err)
+	}
+	if len(matches) == 0 {
+		t.Fatal("embedded frontend is missing Vite's leading-underscore commonjs helper chunk")
+	}
+}
+
+func TestServeSPACacheAndMissingAssetContracts(t *testing.T) {
+	api := &webAPI{staticFS: fstest.MapFS{
+		"index.html":        &fstest.MapFile{Data: []byte("<html>app</html>")},
+		"assets/app-123.js": &fstest.MapFile{Data: []byte("export default 1")},
+	}}
+
+	t.Run("index is never stored", func(t *testing.T) {
+		recorder := httptest.NewRecorder()
+		api.serveSPA(recorder, httptest.NewRequest(http.MethodGet, "/", nil))
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
+		}
+		if got := recorder.Header().Get("Cache-Control"); got != "no-cache, no-store, must-revalidate" {
+			t.Fatalf("Cache-Control = %q", got)
+		}
+	})
+
+	t.Run("hashed asset is immutable", func(t *testing.T) {
+		recorder := httptest.NewRecorder()
+		api.serveSPA(recorder, httptest.NewRequest(http.MethodGet, "/assets/app-123.js", nil))
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d", recorder.Code, http.StatusOK)
+		}
+		if got := recorder.Header().Get("Cache-Control"); got != "public, max-age=31536000, immutable" {
+			t.Fatalf("Cache-Control = %q", got)
+		}
+	})
+
+	t.Run("missing asset does not fall back to index", func(t *testing.T) {
+		recorder := httptest.NewRecorder()
+		api.serveSPA(recorder, httptest.NewRequest(http.MethodGet, "/assets/missing.js", nil))
+		if recorder.Code != http.StatusNotFound {
+			t.Fatalf("status = %d, want %d", recorder.Code, http.StatusNotFound)
+		}
+		if strings.Contains(recorder.Body.String(), "<html>app</html>") {
+			t.Fatal("missing asset returned SPA index")
+		}
+	})
 }
 
 func newWebMultipartRequest(t *testing.T, path string, values map[string]string, files []webTestUploadFile) *http.Request {
