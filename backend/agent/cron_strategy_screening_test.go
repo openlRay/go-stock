@@ -113,11 +113,18 @@ func TestParseStrategyScreeningSearchResponseFallsBackToAbbreviation(t *testing.
 				"dataList": []any{map[string]any{
 					"SECURITY_CODE":      "000001",
 					"SECURITY_NAME_ABBR": "平安银行",
+					"NEW_PRICE":          12.34,
+					"CHANGE_RATE":        2.5,
+					"TURNOVERRATE":       "3.6",
+					"VOLUME_RATIO":       1.2,
+					"INDUSTRY":           "银行",
 				}},
 			},
 		},
 	})
-	if err != nil || len(stocks) != 1 || stocks[0].Name != "平安银行" {
+	if err != nil || len(stocks) != 1 || stocks[0].Name != "平安银行" ||
+		stocks[0].LatestPrice != "12.34" || stocks[0].ChangeRate != "2.5" ||
+		stocks[0].TurnoverRate != "3.6" || stocks[0].VolumeRatio != "1.2" || stocks[0].Industry != "银行" {
 		t.Fatalf("parseStrategyScreeningSearchResponse() = %+v, %v", stocks, err)
 	}
 }
@@ -155,9 +162,9 @@ func TestExecuteStrategyScreeningUsesLatestQueryAndKeepsUpstreamOrder(t *testing
 	if !result.Success || !strings.Contains(result.Summary, "命中 12 只，推送前 10 只") {
 		t.Fatalf("ExecuteTask() result = %+v", result)
 	}
-	if !strings.Contains(result.PlainText, "1. 000001 股票1") ||
-		!strings.Contains(result.PlainText, "10. 000010 股票10") ||
-		strings.Contains(result.PlainText, "11. 000011 股票11") {
+	if !strings.Contains(result.PlainText, "01｜000001 股票1") ||
+		!strings.Contains(result.PlainText, "10｜000010 股票10") ||
+		strings.Contains(result.PlainText, "11｜000011 股票11") {
 		t.Fatalf("PlainText did not keep the first ten upstream rows: %q", result.PlainText)
 	}
 	stored, err := api.GetByID(task.ID)
@@ -174,10 +181,29 @@ func TestBuildStrategyScreeningContentPushLimits(t *testing.T) {
 			if !strings.Contains(content.Summary, fmt.Sprintf("推送前 %d 只", limit)) {
 				t.Fatalf("Summary = %q", content.Summary)
 			}
+			lastStock := fmt.Sprintf("- **%02d｜%06d 股票%d**", limit, limit, limit)
+			nextStock := fmt.Sprintf("- **%02d｜%06d 股票%d**", limit+1, limit+1, limit+1)
+			if !strings.Contains(content.Markdown, "**股票明细**") ||
+				!strings.Contains(content.Markdown, lastStock) || strings.Contains(content.Markdown, nextStock) ||
+				strings.Contains(content.Markdown, "| 序号 |") || strings.Contains(content.Markdown, "- 1.") {
+				t.Fatalf("Markdown did not contain the expected stock list: %q", content.Markdown)
+			}
 			if got := strategyScreeningPlainRowCount(content.PlainText); got != limit {
 				t.Fatalf("displayed rows = %d, want %d\n%s", got, limit, content.PlainText)
 			}
 		})
+	}
+}
+
+func TestBuildStrategyScreeningContentIncludesAvailableMarketDetails(t *testing.T) {
+	content := buildStrategyScreeningContent("策略", "条件", []strategyScreeningStock{{
+		Code: "688502", Name: "茂莱光学", LatestPrice: "265.36", ChangeRate: "2.01",
+		TurnoverRate: "5.68%", VolumeRatio: "1.32", Industry: "光学光电子",
+	}}, 20)
+	wantMarkdown := "- **01｜688502 茂莱光学**｜现价 265.36｜涨跌 2.01%｜换手 5.68%｜量比 1.32｜行业 光学光电子"
+	wantPlainText := "01｜688502 茂莱光学｜现价 265.36｜涨跌 2.01%｜换手 5.68%｜量比 1.32｜行业 光学光电子"
+	if !strings.Contains(content.Markdown, wantMarkdown) || !strings.Contains(content.PlainText, wantPlainText) {
+		t.Fatalf("rich stock details were not rendered: %+v", content)
 	}
 }
 
@@ -332,7 +358,7 @@ func strategyScreeningPlainRowCount(plainText string) int {
 	lines := strings.Split(plainText, "\n")
 	count := 0
 	for _, line := range lines {
-		if strings.Contains(line, ". ") {
+		if strings.Contains(line, "｜") {
 			count++
 		}
 	}

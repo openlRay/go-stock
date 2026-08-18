@@ -24,6 +24,8 @@ const (
 	strategyScreeningQueryRunes        = 700
 	strategyScreeningStockCodeRunes    = 16
 	strategyScreeningStockNameRunes    = 24
+	strategyScreeningMetricRunes       = 16
+	strategyScreeningIndustryRunes     = 16
 )
 
 var strategyScreeningPushLimits = map[int]struct{}{
@@ -126,8 +128,13 @@ func (a *CronTaskApi) executeStrategyScreening(ctx context.Context, task *models
 }
 
 type strategyScreeningStock struct {
-	Code string
-	Name string
+	Code         string
+	Name         string
+	LatestPrice  string
+	ChangeRate   string
+	TurnoverRate string
+	VolumeRatio  string
+	Industry     string
 }
 
 func parseStrategyScreeningSearchResponse(response map[string]any) ([]strategyScreeningStock, error) {
@@ -175,9 +182,38 @@ func parseStrategyScreeningSearchResponse(response map[string]any) ([]strategySc
 		if code == "" || name == "" {
 			return nil, newCronTaskPublicError("选股服务返回数据异常，请稍后重试", nil)
 		}
-		stocks = append(stocks, strategyScreeningStock{Code: code, Name: name})
+		stocks = append(stocks, strategyScreeningStock{
+			Code:         code,
+			Name:         name,
+			LatestPrice:  strategyScreeningOptionalValue(row, strategyScreeningMetricRunes, "NEW_PRICE"),
+			ChangeRate:   strategyScreeningOptionalValue(row, strategyScreeningMetricRunes, "CHANGE_RATE"),
+			TurnoverRate: strategyScreeningOptionalValue(row, strategyScreeningMetricRunes, "TURNOVERRATE", "TURNOVER_RATE"),
+			VolumeRatio:  strategyScreeningOptionalValue(row, strategyScreeningMetricRunes, "VOLUME_RATIO"),
+			Industry:     strategyScreeningOptionalValue(row, strategyScreeningIndustryRunes, "INDUSTRY"),
+		})
 	}
 	return stocks, nil
+}
+
+func strategyScreeningOptionalValue(row map[string]any, maxRunes int, keys ...string) string {
+	for _, key := range keys {
+		value, exists := row[key]
+		if !exists || value == nil {
+			continue
+		}
+		switch value.(type) {
+		case string, json.Number, float64, float32, int, int64, uint, uint64:
+		default:
+			continue
+		}
+		text := normalizeInlineText(stringValue(value))
+		switch strings.ToLower(text) {
+		case "", "-", "--", "null", "n/a", "nan":
+			continue
+		}
+		return truncateRunes(text, maxRunes)
+	}
+	return ""
 }
 
 func buildStrategyScreeningContent(strategyName, query string, stocks []strategyScreeningStock, pushLimit int) cronTaskContent {
@@ -247,13 +283,13 @@ func renderStrategyScreeningContent(strategyName, query string, stocks []strateg
 		fmt.Sprintf("实际展示：%d", displayCount),
 	}
 	if displayCount > 0 {
-		markdownLines = append(markdownLines, "| 序号 | 股票代码 | 股票名称 |", "| ---: | --- | --- |")
+		// 飞书和钉钉的 Markdown 子集都能稳定渲染列表；序号后不使用点号，避免飞书解析成嵌套列表。
+		markdownLines = append(markdownLines, "", "**股票明细**")
 		plainLines = append(plainLines, "股票列表：")
 		for index := 0; index < displayCount; index++ {
-			code := truncateRunes(normalizeInlineText(stocks[index].Code), strategyScreeningStockCodeRunes)
-			name := truncateRunes(normalizeInlineText(stocks[index].Name), strategyScreeningStockNameRunes)
-			markdownLines = append(markdownLines, fmt.Sprintf("| %d | %s | %s |", index+1, escapeMarkdown(code), escapeMarkdown(name)))
-			plainLines = append(plainLines, fmt.Sprintf("%d. %s %s", index+1, code, name))
+			markdownLine, plainLine := renderStrategyScreeningStockLine(index+1, stocks[index])
+			markdownLines = append(markdownLines, markdownLine)
+			plainLines = append(plainLines, plainLine)
 		}
 	}
 	return cronTaskContent{
@@ -261,6 +297,42 @@ func renderStrategyScreeningContent(strategyName, query string, stocks []strateg
 		Markdown:  strings.Join(markdownLines, "\n"),
 		PlainText: strings.Join(plainLines, "\n"),
 	}
+}
+
+func renderStrategyScreeningStockLine(index int, stock strategyScreeningStock) (string, string) {
+	code := truncateRunes(normalizeInlineText(stock.Code), strategyScreeningStockCodeRunes)
+	name := truncateRunes(normalizeInlineText(stock.Name), strategyScreeningStockNameRunes)
+	markdownDetails := make([]string, 0, 5)
+	plainDetails := make([]string, 0, 5)
+	appendDetail := func(label, value string) {
+		value = normalizeInlineText(value)
+		if value == "" {
+			return
+		}
+		markdownDetails = append(markdownDetails, label+" "+escapeMarkdown(value))
+		plainDetails = append(plainDetails, label+" "+value)
+	}
+	appendDetail("现价", truncateRunes(stock.LatestPrice, strategyScreeningMetricRunes))
+	appendDetail("涨跌", strategyScreeningPercent(stock.ChangeRate))
+	appendDetail("换手", strategyScreeningPercent(stock.TurnoverRate))
+	appendDetail("量比", truncateRunes(stock.VolumeRatio, strategyScreeningMetricRunes))
+	appendDetail("行业", truncateRunes(stock.Industry, strategyScreeningIndustryRunes))
+
+	markdownLine := fmt.Sprintf("- **%02d｜%s %s**", index, escapeMarkdown(code), escapeMarkdown(name))
+	plainLine := fmt.Sprintf("%02d｜%s %s", index, code, name)
+	if len(markdownDetails) > 0 {
+		markdownLine += "｜" + strings.Join(markdownDetails, "｜")
+		plainLine += "｜" + strings.Join(plainDetails, "｜")
+	}
+	return markdownLine, plainLine
+}
+
+func strategyScreeningPercent(value string) string {
+	value = truncateRunes(normalizeInlineText(value), strategyScreeningMetricRunes)
+	if value == "" || strings.HasSuffix(value, "%") {
+		return value
+	}
+	return value + "%"
 }
 
 func normalizeInlineText(value string) string {

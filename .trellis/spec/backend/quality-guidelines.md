@@ -74,6 +74,7 @@ Go 从被测 package 目录内发现 `_test.go`。`foo_test.go` 与 `foo.go` 同
 
 - 先 normalize、截断业务字段，再执行 Markdown/HTML 转义；预算按转义后的 rune 数计算。
 - 列表按完整行逐条追加，每次同时检查 Markdown 与 PlainText，不能依赖最终统一截断切断表格或半行文本。
+- 面向多个机器人渠道的 Markdown 只使用共同支持的标题、强调和单层列表；股票等业务明细不得使用标准 Markdown table，也不得把外层 `-` 与内层 `1.` 组合，因为飞书会忽略表格块或把序号解析为嵌套列表。
 - formatter 返回的详情必须为通知包装层预留固定安全空间；超出时正文明确报告实际展示数量。
 - `Summary`、`Markdown`、`PlainText` 都不得声称发送了未实际容纳的条目。
 
@@ -85,16 +86,18 @@ Go 从被测 package 目录内发现 `_test.go`。`foo_test.go` 与 `foo.go` 同
 | “全部”结果无法全部容纳 | 成功发送可容纳部分，并报告总数与实际展示数 |
 | 固定数量仍因字段过长无法容纳全部 | 按完整行降级，并报告实际展示数 |
 | Markdown 与 PlainText 预算不同 | 取两者都能安全容纳的条目数 |
+| Markdown table 在飞书卡片中被忽略，或 `- 1.` 被解析为嵌套列表 | 改用 `- **01｜代码 名称**` 形式的单层列表 |
 
 ### 5. Good / Base / Bad Cases
 
-- Good：使用全 `<`、`>`、`|` 等最坏转义输入测试最终载荷，列表逐行试算。
+- Good：使用全 `<`、`>`、`|` 等最坏转义输入测试最终载荷，业务明细用普通列表逐行试算。
 - Base：普通短文本按配置数量完整展示。
-- Bad：按原始字符串长度截断后再转义，或先生成超长表格再由通用 `truncate` 从中间截断。
+- Bad：按原始字符串长度截断后再转义，使用渠道不兼容的 Markdown table，或先生成超长内容再由通用 `truncate` 从中间截断。
 
 ### 6. Tests Required
 
 - 普通固定数量：断言总命中数、展示数和最后一条序号。
+- 渠道兼容格式：断言 Markdown 使用列表且首尾股票代码、名称均存在，不包含 table header 或 `- 1.` 嵌套列表前缀。
 - “全部”短列表：断言全部条目存在。
 - “全部”超长列表：断言最终 Markdown/PlainText 不超过预算，且摘要中的实际展示数等于完整行数。
 - 最坏转义输入：策略名、条件或条目字段只使用会膨胀的特殊字符，断言转义后仍在预算内。
@@ -112,6 +115,15 @@ candidate := renderEscapedContent(fields, rows[:next])
 if runeCount(candidate.Markdown) > detailBudget || runeCount(candidate.PlainText) > detailBudget {
 	break
 }
+
+// Wrong：飞书卡片会忽略标准 Markdown table。
+line := fmt.Sprintf("| %d | %s | %s |", index, code, name)
+
+// Wrong：飞书会把外层圆点和内层数字解析成两级列表。
+line := fmt.Sprintf("- %d. **%s** %s", index, code, name)
+
+// Correct：使用飞书和钉钉共同支持的单层列表，序号后不接点号。
+line := fmt.Sprintf("- **%02d｜%s %s**", index, code, name)
 ```
 
 ## Trellis task 归档提交契约

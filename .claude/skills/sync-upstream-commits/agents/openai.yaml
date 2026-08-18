@@ -1,0 +1,4 @@
+interface:
+  display_name: "同步上游提交"
+  short_description: "安全合并 go-stock 上游 dev 提交并由 AI 处理冲突"
+  default_prompt: "使用 $sync-upstream-commits 检查并合并上游 dev 提交，在合并前先展示缺失提交并等待确认。"

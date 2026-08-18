@@ -76,6 +76,7 @@ Cron task
 - 成功响应要求 `code == 100` 且 `data.result.dataList` 为数组。
 - 命中总数使用 `len(dataList)`，最多代表本次接口返回的 5000 条；通知文案不声称超过接口上限的精确全市场总数。
 - 股票代码读取 `SECURITY_CODE`；名称优先 `SECURITY_SHORT_NAME`，兼容 `SECURITY_NAME_ABBR`。
+- 可选读取 `NEW_PRICE`、`CHANGE_RATE`、`TURNOVERRATE`（兼容 `TURNOVER_RATE`）、`VOLUME_RATIO` 和 `INDUSTRY`；缺失、占位符或非标量值不影响该股票的代码和名称展示。
 - 保留上游返回顺序，不在本地重新排序。
 - 空 `dataList` 是成功结果，不是异常。
 - 缺少 `qgqp_b_id` 映射为明确配置提示；其他外部错误和畸形响应使用安全通用错误，日志不得输出完整响应正文或凭据。
@@ -92,9 +93,9 @@ Markdown 正文包含：
 - 策略名称；
 - 规范化后的选股条件；
 - 命中总数与本次列出数量；
-- `序号 / 股票代码 / 股票名称` 表格。
+- 单层股票列表，序号使用 `01｜代码 名称`，避免飞书把 `- 1.` 解析为嵌套列表；可用时追加现价、涨跌、换手、量比和行业。
 
-PlainText 使用等价的逐行列表。策略文本和单元格进行换行规整、Markdown 转义和 rune 截断；格式化时预留标题和说明空间，并只追加能够同时安全容纳于 Markdown/PlainText 长度预算的完整股票行，避免统一截断发生在半行或表格中间。“全部”超出预算时正文明确写出实际展示数量。最终仍受现有 `cronNotificationMaxRunes` 统一上限保护。一次执行只返回一个 `cronTaskContent`，不在 handler 中直接调用任何通知渠道。
+PlainText 使用等价的逐行列表。策略文本和明细字段进行换行规整、Markdown 转义和 rune 截断；格式化时预留标题和说明空间，并只追加能够同时安全容纳于 Markdown/PlainText 长度预算的完整股票行，避免统一截断发生在半行中间。“全部”超出预算时正文明确写出实际展示数量。最终仍受现有 `cronNotificationMaxRunes` 统一上限保护。一次执行只返回一个 `cronTaskContent`，不在 handler 中直接调用任何通知渠道。
 
 ## 6. 前端表单
 
