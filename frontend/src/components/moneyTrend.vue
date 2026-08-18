@@ -40,7 +40,7 @@ const handleLine = (code, days) => {
     const netamount_values = [];
     const r0_net_values = [];
     const trades_values = [];
-    let volume = []
+    const twoDayNetValues = []
 
     let min = 0
     let max = 0
@@ -60,15 +60,16 @@ const handleLine = (code, days) => {
         max = price
       }
 
+      // 该序列表示当前交易日与前一交易日的净流入合计；区间首日没有前值，仅展示当日金额。
       if (i > 0) {
         let b = Number(Number(result[i].netamount) + Number(result[i - 1].netamount)) / 10000
-        volume.push(b.toFixed(2))
+        twoDayNetValues.push(b.toFixed(2))
       } else {
-        volume.push((Number(result[i].netamount) / 10000).toFixed(2))
+        twoDayNetValues.push((Number(result[i].netamount) / 10000).toFixed(2))
       }
 
     }
-    //console.log("volume", volume)
+    //console.log("twoDayNetValues", twoDayNetValues)
     const upColor = '#ec0000';
     const downColor = '#00da3c';
     let option = {
@@ -109,11 +110,11 @@ const handleLine = (code, days) => {
       },
       legend: {
         show: true,
-        data: ['当日净流入', '主力当日净流入','累计净流入',  '股价'],
+        data: ['当日净流入', '主力当日净流入','近两日净流入合计',  '股价'],
         selected: {
           '当日净流入': true,
           '主力当日净流入': true,
-          '累计净流入': true,
+          '近两日净流入合计': true,
           '股价': true,
         },
         //orient: 'vertical',
@@ -202,7 +203,7 @@ const handleLine = (code, days) => {
         },
         {
           gridIndex: 1,
-          name: '累计净流入/万',
+          name: '近两日净流入合计/万',
           type: 'value',
           axisLine: {
             show: true
@@ -334,8 +335,11 @@ const handleLine = (code, days) => {
           type: 'bar',
           xAxisIndex: 1,
           yAxisIndex: 2,
-          name: '累计净流入',
-          data: volume,
+          name: '近两日净流入合计',
+          data: twoDayNetValues,
+          tooltip: {
+            valueFormatter: (value) => `${Number(value).toLocaleString('zh-CN')} 万（当日 + 前一交易日）`
+          },
           smooth: true,
           showSymbol: false,
           lineStyle: {

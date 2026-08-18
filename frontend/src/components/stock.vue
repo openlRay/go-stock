@@ -656,6 +656,16 @@ const allTableColumns = [
     }
   },
   {
+    title: '成本价', key: 'costPrice', width: 100,
+    sorter: (a, b) => Number(a.costPrice) - Number(b.costPrice),
+    render(row) {
+      const costPrice = Number(row.costPrice)
+      return h(NText, { depth: costPrice > 0 ? 1 : 3 }, {
+        default: () => costPrice > 0 ? row.costPrice : '—'
+      })
+    }
+  },
+  {
     title: '涨跌幅', key: 'changePercent', width: 90,
     sorter: (a, b) => Number(a.changePercent) - Number(b.changePercent),
     defaultSortOrder: 'descend',

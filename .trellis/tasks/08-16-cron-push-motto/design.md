@@ -247,6 +247,13 @@ type AIConfigTestResult struct {
 - 成功消息展示配置类型、耗时和可选短预览；失败消息只展示后端安全文案。
 - 测试按钮不关闭抽屉、不刷新配置列表、不改变默认模型，也不保存草稿。
 
+### 8.4 Docker Web 动态路由资源
+
+- `main.go` 使用 `//go:embed all:frontend/dist`，确保 Vite 生成的 `_commonjsHelpers-*` 等下划线 chunk 被编译进 Web 二进制。
+- `serveSPA` 对存在的哈希资源设置 immutable cache；对 index/history fallback 设置 no-store。
+- `/assets/*` 缺失时直接返回 404，不允许 SPA fallback 用 `index.html` 伪装静态资源成功。
+- Web-tag 回归测试同时验证嵌入文件集和 HTTP handler 契约；Linux Web build 对应 Docker 的最终编译形态。
+
 ## 9. 兼容性、风险与回滚
 
 ### 9.1 兼容性

@@ -1501,7 +1501,7 @@ type CronTask struct {
 	UpdatedAt          time.Time  `json:"updatedAt"`
 	Name               string     `json:"name" gorm:"size:255;not null"`
 	CronExpr           string     `json:"cronExpr" gorm:"size:100;not null"`
-	TaskType           string     `json:"taskType" gorm:"size:50;not null"` // stock_analysis, fund_analysis, news_fetch, custom, motto_push
+	TaskType           string     `json:"taskType" gorm:"size:50;not null"` // stock_analysis, fund_analysis, news_fetch, custom, strategy_screening, motto_push
 	Target             string     `json:"target" gorm:"size:255"`           // 股票代码或其他目标
 	Params             string     `json:"params" gorm:"type:text"`          // JSON 格式的任务参数
 	Enable             bool       `json:"enable" gorm:"default:true"`

@@ -58,6 +58,62 @@ Go 从被测 package 目录内发现 `_test.go`。`foo_test.go` 与 `foo.go` 同
 
 不要把单 package 测试描述为全仓测试，也不要把 build 成功描述成交互回归。
 
+## 场景：限长通知的最终载荷预算
+
+### 1. Scope / Trigger
+
+当任务、告警或机器人通知存在字符数上限，并且正文还会经过 Markdown 转义、HTML 实体编码或统一标题包装时适用。限制必须针对最终可发送载荷，而不是只检查原始业务文本。
+
+### 2. Signatures
+
+- Cron 执行结果：`CronTaskExecutionResult{Summary, Markdown, PlainText}`。
+- 通知包装入口：`App.pushCronTaskResult(task, result)`。
+- 当前 Cron 详情上限：`cronNotificationMaxRunes = 4000`；具体 formatter 必须为统一标题、状态、时间和摘要预留空间。
+
+### 3. Contracts
+
+- 先 normalize、截断业务字段，再执行 Markdown/HTML 转义；预算按转义后的 rune 数计算。
+- 列表按完整行逐条追加，每次同时检查 Markdown 与 PlainText，不能依赖最终统一截断切断表格或半行文本。
+- formatter 返回的详情必须为通知包装层预留固定安全空间；超出时正文明确报告实际展示数量。
+- `Summary`、`Markdown`、`PlainText` 都不得声称发送了未实际容纳的条目。
+
+### 4. Validation & Error Matrix
+
+| 条件 | 处理 |
+| --- | --- |
+| 原始文本可容纳，但转义后超限 | 缩短字段或减少完整列表行 |
+| “全部”结果无法全部容纳 | 成功发送可容纳部分，并报告总数与实际展示数 |
+| 固定数量仍因字段过长无法容纳全部 | 按完整行降级，并报告实际展示数 |
+| Markdown 与 PlainText 预算不同 | 取两者都能安全容纳的条目数 |
+
+### 5. Good / Base / Bad Cases
+
+- Good：使用全 `<`、`>`、`|` 等最坏转义输入测试最终载荷，列表逐行试算。
+- Base：普通短文本按配置数量完整展示。
+- Bad：按原始字符串长度截断后再转义，或先生成超长表格再由通用 `truncate` 从中间截断。
+
+### 6. Tests Required
+
+- 普通固定数量：断言总命中数、展示数和最后一条序号。
+- “全部”短列表：断言全部条目存在。
+- “全部”超长列表：断言最终 Markdown/PlainText 不超过预算，且摘要中的实际展示数等于完整行数。
+- 最坏转义输入：策略名、条件或条目字段只使用会膨胀的特殊字符，断言转义后仍在预算内。
+- 通知边界集成测试：让结果经过真实统一包装入口，断言一次执行只产生一次事件和一次推送。
+
+### 7. Wrong vs Correct
+
+```go
+// Wrong：raw 合法不代表 escapeMarkdown(raw) 仍在预算内。
+raw = truncateRunes(raw, limit)
+payload := escapeMarkdown(raw)
+
+// Correct：为包装和最坏转义预留空间，并检查最终候选载荷。
+candidate := renderEscapedContent(fields, rows[:next])
+if runeCount(candidate.Markdown) > detailBudget || runeCount(candidate.PlainText) > detailBudget {
+	break
+}
+```
+
 ## Trellis task 归档提交契约
 
 ### 1. 适用范围 / 触发

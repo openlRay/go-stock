@@ -1,9 +1,16 @@
 package data
 
 import (
+	"errors"
+	"fmt"
 	"go-stock/backend/db"
 	"go-stock/backend/models"
+
+	"gorm.io/gorm"
 )
+
+// ErrCustomStrategyNotFound 表示指定的自定义策略不存在或已被删除。
+var ErrCustomStrategyNotFound = errors.New("自定义策略不存在")
 
 type CustomStrategyApi struct{}
 
@@ -56,6 +63,21 @@ func (a *CustomStrategyApi) GetAllCustomStrategies() *[]models.CustomStrategy {
 	var list []models.CustomStrategy
 	db.Dao.Model(&models.CustomStrategy{}).Order("sort_order ASC, created_at DESC").Find(&list)
 	return &list
+}
+
+// GetByID 按稳定 ID 读取策略，供定时任务在每次执行时获取最新条件。
+func (a *CustomStrategyApi) GetByID(id uint) (*models.CustomStrategy, error) {
+	if id == 0 {
+		return nil, ErrCustomStrategyNotFound
+	}
+	var strategy models.CustomStrategy
+	if err := db.Dao.First(&strategy, id).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, fmt.Errorf("%w: id=%d", ErrCustomStrategyNotFound, id)
+		}
+		return nil, fmt.Errorf("查询自定义策略失败: %w", err)
+	}
+	return &strategy, nil
 }
 
 func (a *CustomStrategyApi) SaveCustomStrategy(strategy models.CustomStrategy) string {

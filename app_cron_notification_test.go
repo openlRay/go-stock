@@ -126,6 +126,56 @@ func TestExecuteCronTaskNotificationBoundary(t *testing.T) {
 	}
 }
 
+func TestExecuteCronTaskStrategyScreeningUsesUnifiedNotificationBoundary(t *testing.T) {
+	previous := db.Dao
+	database, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("open test db: %v", err)
+	}
+	if err := database.AutoMigrate(&models.CronTask{}, &models.CustomStrategy{}); err != nil {
+		t.Fatalf("migrate test db: %v", err)
+	}
+	db.Dao = database
+	t.Cleanup(func() { db.Dao = previous })
+
+	api := agent.NewCronTaskApi()
+	task := &models.CronTask{
+		Name: "策略推送", CronExpr: "0 0 9 * * *", TaskType: agent.CronTaskTypeStrategyScreening,
+		Params: `{"strategyId":999,"pushLimit":20}`, Enable: true, Status: "active", NotifyOnCompletion: false,
+	}
+	if err := api.Create(task); err != nil {
+		t.Fatalf("create strategy task: %v", err)
+	}
+	if !task.NotifyOnCompletion {
+		t.Fatal("strategy screening task should force completion notification")
+	}
+
+	pushCount := 0
+	var pushedResult *agent.CronTaskExecutionResult
+	eventRecorder := &cronTaskEventRecorder{t: t}
+	app := &App{
+		eventEmitter: eventRecorder,
+		cronResultPusher: func(_ *models.CronTask, result *agent.CronTaskExecutionResult) error {
+			pushCount++
+			pushedResult = result
+			return nil
+		},
+	}
+
+	if err := app.executeCronTask(task); err == nil {
+		t.Fatal("deleted strategy should fail execution")
+	}
+	if pushCount != 1 || pushedResult == nil || pushedResult.Success {
+		t.Fatalf("strategy failure push = %d, %+v", pushCount, pushedResult)
+	}
+	if !strings.Contains(pushedResult.Summary, "所选策略不存在或已删除") {
+		t.Fatalf("strategy failure summary = %q", pushedResult.Summary)
+	}
+	if len(eventRecorder.events) != 1 || eventRecorder.events[0].Success {
+		t.Fatalf("strategy completion events = %+v", eventRecorder.events)
+	}
+}
+
 func TestExecuteCronTaskSkipsCompletionSideEffectsWhenRunInfoPersistenceFails(t *testing.T) {
 	previous := db.Dao
 	database, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})

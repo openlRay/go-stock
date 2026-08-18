@@ -1,8 +1,8 @@
 {
-  "id": "cron-push-motto",
-  "name": "cron-push-motto",
-  "title": "定时任务推送与我的格言",
-  "description": "",
+  "id": "strategy-screening-push",
+  "name": "strategy-screening-push",
+  "title": "策略定时选股推送",
+  "description": "新增可选择我的策略、配置推送数量并按 Cron 执行选股结果通知的定时任务类型。",
   "status": "in_progress",
   "dev_type": null,
   "scope": null,
@@ -10,7 +10,7 @@
   "priority": "P2",
   "creator": "O",
   "assignee": "O",
-  "createdAt": "2026-08-16",
+  "createdAt": "2026-08-18",
   "completedAt": null,
   "branch": null,
   "base_branch": "dev",
@@ -18,10 +18,8 @@
   "commit": null,
   "pr_url": null,
   "subtasks": [],
-  "children": [
-    "08-18-strategy-screening-push"
-  ],
-  "parent": null,
+  "children": [],
+  "parent": "08-16-cron-push-motto",
   "relatedFiles": [],
   "notes": "",
   "meta": {}

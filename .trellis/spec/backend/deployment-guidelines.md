@@ -18,6 +18,59 @@ Docker 使用多阶段构建：
 - 保持 `GOSUMDB` 开启；不能通过关闭 checksum 解决依赖下载问题。
 - 修改镜像/代理参数后使用 `docker compose config` 检查最终展开值。
 
+## Scenario: Vite 静态资源完整嵌入
+
+### 1. Scope / Trigger
+
+Web/Docker 二进制通过 `embed.FS` 托管 Vite `frontend/dist`，或前端新增动态导入、代码分包和按需路由时适用。
+
+### 2. Signatures
+
+- 嵌入声明：`//go:embed all:frontend/dist` 与 `var assets embed.FS`。
+- 静态路由：`GET /assets/<content-hash>.<ext>`。
+- SPA fallback：只处理非 `/api/`、非缺失 `/assets/` 的前端路由。
+
+### 3. Contracts
+
+- 必须使用 `all:` 嵌入 `frontend/dist`，因为 Go Embed 的普通目录模式会排除名称以 `.` 或 `_` 开头的文件，而 Vite/Rollup 可能生成 `_commonjsHelpers-*.js`。
+- 缺失 `/assets/*` 必须返回 `404`，不得返回 `index.html`；否则浏览器会把 HTML 当 JavaScript 并报告误导性的动态导入失败。
+- `index.html` 和 SPA fallback 使用 `no-cache, no-store, must-revalidate`；带内容哈希的 `/assets/*` 使用 `public, max-age=31536000, immutable`。
+- Docker runtime 只复制 Web 二进制时，二进制内的文件集必须与同次 Vite build 的 import graph 完全一致。
+
+### 4. Validation & Error Matrix
+
+| 条件 | 行为 |
+| --- | --- |
+| Vite 产物包含 `_commonjsHelpers-*.js` | 文件可从嵌入 FS 读取，并由 `/assets/*` 返回 JavaScript |
+| 请求不存在的哈希资源 | 返回 `404`，响应不得包含 SPA index |
+| 请求 `/` 或前端 history route | 返回 index，并禁止浏览器持久缓存入口版本 |
+| 请求存在的哈希资源 | 返回正确 Content-Type 和 immutable cache header |
+
+### 5. Good / Base / Bad Cases
+
+- Good：动态路由首次访问时，入口 chunk、页面 chunk 和所有二级依赖都来自同一嵌入构建。
+- Base：普通非动态页面仍由 SPA fallback 返回 index，刷新 history route 可正常恢复。
+- Bad：使用 `//go:embed frontend/dist` 漏掉下划线文件；缺失 JS 返回 `200 text/html`；入口页和哈希资源使用同一长期缓存策略。
+
+### 6. Tests Required
+
+- Web-tag 测试使用 glob 断言嵌入 FS 包含 `_commonjsHelpers-*.js`，不依赖具体内容哈希。
+- handler 测试断言 index no-store、哈希资源 immutable、缺失资源 404 且不返回 index。
+- `GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -tags web .` 验证 Docker 对应编译路径。
+- 发布 smoke 应解析入口与动态 chunk 的静态 imports，并确认远端均返回 JavaScript/CSS 而不是 HTML fallback。
+
+### 7. Wrong vs Correct
+
+```go
+// Wrong：普通目录模式会排除 _commonjsHelpers-*.js。
+//go:embed frontend/dist
+var assets embed.FS
+
+// Correct：all: 保留 Vite 构建生成的完整文件集。
+//go:embed all:frontend/dist
+var assets embed.FS
+```
+
 ## 运行用户与目录
 
 - runtime 以非 root `go-stock:go-stock`（UID/GID `10001`）运行。

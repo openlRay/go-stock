@@ -293,6 +293,35 @@
               </n-grid>
             </n-space>
           </n-card>
+
+          <n-card v-else-if="formData.taskType === 'strategy_screening'" size="small" style="width: 100%">
+            <n-space :vertical="true" :size="12">
+              <n-alert v-if="!customStrategiesLoading && customStrategyOptions.length === 0" type="warning" :bordered="false">
+                暂无“我的策略”，请先到指标选股页面保存至少一条策略。
+              </n-alert>
+              <n-form-item label-width="90px" label="我的策略:">
+                <n-select
+                  v-model:value="strategyScreeningParamsData.strategyId"
+                  :options="customStrategyOptions"
+                  :loading="customStrategiesLoading"
+                  :disabled="!customStrategiesLoading && customStrategyOptions.length === 0"
+                  placeholder="请选择要定时执行的策略"
+                  filterable
+                  style="width: 100%"
+                />
+              </n-form-item>
+              <n-form-item label-width="90px" label="推送数量:">
+                <n-select
+                  v-model:value="strategyScreeningParamsData.pushLimit"
+                  :options="strategyPushLimitOptions"
+                  style="width: 100%"
+                />
+              </n-form-item>
+              <n-text depth="3" style="font-size: 12px">
+                “全部”会尽量列出本次返回的全部股票；超过通知安全长度时会标明实际展示数量。
+              </n-text>
+            </n-space>
+          </n-card>
           
           <!-- 其他任务类型仍使用文本输入框 -->
           <n-alert v-else-if="formData.taskType === 'motto_push'" type="info" :bordered="false">
@@ -324,13 +353,16 @@
             <n-switch
               v-model:value="formData.notifyOnCompletion"
               size="large"
-              :disabled="formData.taskType === 'motto_push'"
+              :disabled="['motto_push', 'strategy_screening'].includes(formData.taskType)"
             >
               <template #checked>开启</template>
               <template #unchecked>关闭</template>
             </n-switch>
             <n-text v-if="formData.taskType === 'motto_push'" depth="3" style="font-size: 12px">
               “推送格言”任务必须推送执行结果，因此该开关已自动开启。
+            </n-text>
+            <n-text v-else-if="formData.taskType === 'strategy_screening'" depth="3" style="font-size: 12px">
+              “策略选股推送”任务必须推送执行结果，因此该开关已自动开启。
             </n-text>
           </div>
         </n-form-item>
@@ -399,7 +431,8 @@ import {
   SearchCronTasks,
   GetAiConfigs,
   CalculateNextRunTimes,
-  GetPromptTemplates
+  GetPromptTemplates,
+  GetAllCustomStrategies
 } from '../../wailsjs/go/main/App'
 import {EventsOn} from '../../wailsjs/runtime'
 import CronScheduleEditor from './cron-schedule-editor.vue'
@@ -451,6 +484,12 @@ const statusOptions = [
   { label: '暂停', value: 'paused' },
   { label: '错误', value: 'error' }
 ]
+const strategyPushLimitOptions = [
+  { label: '10 只', value: 10 },
+  { label: '20 只', value: 20 },
+  { label: '50 只', value: 50 },
+  { label: '全部', value: 0 }
+]
 
 // 生成参数 JSON 预览
 const generatedParamsJson = computed(() => {
@@ -473,6 +512,12 @@ const generatedParamsJson = computed(() => {
       sysPromptId: marketAnalysisParamsData.sysPromptId ,
       thinking: marketAnalysisParamsData.thinking,
       agentMode: marketAnalysisParamsData.agentMode
+    }, null, 2)
+  }
+  if(formData.taskType==='strategy_screening'){
+    return JSON.stringify({
+      strategyId: strategyScreeningParamsData.strategyId,
+      pushLimit: strategyScreeningParamsData.pushLimit
     }, null, 2)
   }
   return formData.params || ''
@@ -516,6 +561,12 @@ const marketAnalysisParamsData= reactive({
   thinking: true,
   agentMode: ''
 })
+const strategyScreeningParamsData = reactive({
+  strategyId: null,
+  pushLimit: 20
+})
+const customStrategyOptions = ref([])
+const customStrategiesLoading = ref(false)
 // 获取任务类型显示名称
 const getTaskTypeLabel = (value) => {
   const option = taskTypeOptions.value.find(opt => opt.value === value)
@@ -738,6 +789,24 @@ const loadTaskTypes = async () => {
   }
 }
 
+const loadCustomStrategies = async () => {
+  customStrategiesLoading.value = true
+  customStrategyOptions.value = []
+  try {
+    const strategies = await GetAllCustomStrategies()
+    customStrategyOptions.value = (strategies || []).map(strategy => ({
+      label: strategy.name,
+      value: Number(strategy.id)
+    }))
+  } catch (error) {
+    customStrategyOptions.value = []
+    console.error('加载我的策略失败:', error)
+    message.error('加载我的策略失败')
+  } finally {
+    customStrategiesLoading.value = false
+  }
+}
+
 // 加载 AI 配置
 const aiConfigOptions=ref([])
 let stopAIConfigsChangedListener = () => {}
@@ -857,16 +926,18 @@ const handleToggleEnable = async (row) => {
 }
 
 // 创建任务
-const handleCreate = () => {
+const handleCreate = async () => {
   editingTask.value = false
   resetForm()
   showCreateModal.value = true
+  await loadCustomStrategies()
 }
 
 // 编辑任务
 const handleEdit = async (row) => {
   editingTask.value = true
   try {
+    await loadCustomStrategies()
     const task = await GetCronTaskByID(row.id)
     if (task) {
       // 先重置表单和 Cron 配置器
@@ -912,6 +983,22 @@ const handleEdit = async (row) => {
           marketAnalysisParamsData.agentMode = parsed.agentMode || ''
         } catch (e) {
           console.error('解析参数失败:', e)
+        }
+      }
+
+      if (task.taskType === 'strategy_screening' && task.params) {
+        try {
+          const parsed = JSON.parse(task.params)
+          strategyScreeningParamsData.strategyId = Number(parsed.strategyId) || null
+          // 兼容早期任务参数：只有字段缺失时才回退 20，显式 0 保留为“全部”。
+          const parsedPushLimit = Object.prototype.hasOwnProperty.call(parsed, 'pushLimit')
+            ? Number(parsed.pushLimit)
+            : 20
+          strategyScreeningParamsData.pushLimit = [0, 10, 20, 50].includes(parsedPushLimit)
+            ? parsedPushLimit
+            : 20
+        } catch (e) {
+          console.error('解析策略选股参数失败:', e)
         }
       }
       
@@ -986,6 +1073,33 @@ const handleSubmit = async () => {
         `两次执行间隔过短（约 ${intervalCheck.minIntervalSeconds} 秒），请将间隔设置为至少 60 秒后再保存。`
       )
       return
+    }
+
+    if (formData.taskType === 'strategy_screening') {
+      if (customStrategiesLoading.value) {
+        message.warning('策略列表正在加载，请稍后再试')
+        return
+      }
+      if (customStrategyOptions.value.length === 0) {
+        message.warning('暂无可用的“我的策略”，请先保存策略')
+        return
+      }
+      if (!strategyScreeningParamsData.strategyId) {
+        message.warning('请选择要定时执行的策略')
+        return
+      }
+      const strategyExists = customStrategyOptions.value.some(
+        option => Number(option.value) === Number(strategyScreeningParamsData.strategyId)
+      )
+      if (!strategyExists) {
+        message.warning('所选策略不存在或已删除，请重新选择')
+        return
+      }
+      if (![0, 10, 20, 50].includes(Number(strategyScreeningParamsData.pushLimit))) {
+        message.warning('请选择有效的推送数量')
+        return
+      }
+      formData.notifyOnCompletion = true
     }
 
     formData.params = generatedParamsJson.value
@@ -1063,6 +1177,10 @@ const resetForm = () => {
     thinking: true,
     agentMode: ''
   })
+  Object.assign(strategyScreeningParamsData, {
+    strategyId: null,
+    pushLimit: 20
+  })
   calculateNextRunTime.value = ''
   // 重置表单校验状态
   if (formRef.value) {
@@ -1075,7 +1193,7 @@ const taskList = ref([])
 
 // 监听任务类型变化，重置参数
 watch(() => formData.taskType, (newType) => {
-  if (newType === 'motto_push') {
+  if (newType === 'motto_push' || newType === 'strategy_screening') {
     formData.notifyOnCompletion = true
   }
   if (newType === 'stock_analysis') {
@@ -1104,6 +1222,7 @@ onMounted(async () => {
   await loadTaskTypes()
   await loadAiConfigs()
   await loadPromptTemplates()
+  await loadCustomStrategies()
   await loadTaskList()
 })
 

@@ -61,6 +61,12 @@
 - [x] 检查 `App.js`、`App.d.ts`、`models.ts` 包含所有 Motto RPC/type 和 `CronTask.notifyOnCompletion`。
 - [x] 检查 Web RPC allowlist 可从生成 binding 发现新方法，且未修改 desktop-only allowlist。
 
+## 8.1 Docker Web 动态资源
+
+- [x] 将前端嵌入声明改为 `all:frontend/dist`，覆盖 Vite 下划线/点号开头 chunk。
+- [x] 缺失 `/assets/*` 返回 404；index 与哈希资源分别使用 no-store 和 immutable 缓存契约。
+- [x] 增加嵌入 FS、静态 handler 回归测试，并通过 Linux Web build。
+
 ## 9. 验证顺序
 
 按修改风险运行最小相关证据集：

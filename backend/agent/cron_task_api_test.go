@@ -19,7 +19,7 @@ func withCronTaskTestDB(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open test db: %v", err)
 	}
-	if err := database.AutoMigrate(&models.CronTask{}, &models.Motto{}); err != nil {
+	if err := database.AutoMigrate(&models.CronTask{}, &models.Motto{}, &models.CustomStrategy{}); err != nil {
 		t.Fatalf("migrate test db: %v", err)
 	}
 	db.Dao = database

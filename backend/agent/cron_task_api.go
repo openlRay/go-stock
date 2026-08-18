@@ -88,18 +88,40 @@ func CronTaskLocation() *time.Location {
 	return cronTaskLocation()
 }
 
-type CronTaskApi struct{}
+type CronTaskApi struct {
+	strategySearch strategySearchFunc
+}
 
 func NewCronTaskApi() *CronTaskApi {
-	return &CronTaskApi{}
+	return &CronTaskApi{
+		strategySearch: defaultStrategySearch,
+	}
+}
+
+func normalizeCronTaskForSave(task *models.CronTask) error {
+	if task.TaskType == CronTaskTypeStrategyScreening {
+		params, err := parseStrategyScreeningTaskParams(task.Params)
+		if err != nil {
+			return err
+		}
+		normalized, err := json.Marshal(params)
+		if err != nil {
+			return fmt.Errorf("序列化策略选股任务参数失败: %w", err)
+		}
+		task.Params = string(normalized)
+	}
+	if task.TaskType == CronTaskTypeMottoPush || task.TaskType == CronTaskTypeStrategyScreening {
+		task.NotifyOnCompletion = true
+	}
+	return nil
 }
 
 func (a *CronTaskApi) Create(task *models.CronTask) error {
 	if task == nil {
 		return fmt.Errorf("任务信息不能为空")
 	}
-	if task.TaskType == CronTaskTypeMottoPush {
-		task.NotifyOnCompletion = true
+	if err := normalizeCronTaskForSave(task); err != nil {
+		return err
 	}
 	requestedEnable := task.Enable
 	return db.Dao.Transaction(func(tx *gorm.DB) error {
@@ -123,8 +145,8 @@ func (a *CronTaskApi) Update(task *models.CronTask) error {
 	if task == nil || task.ID == 0 {
 		return fmt.Errorf("无效的任务ID")
 	}
-	if task.TaskType == CronTaskTypeMottoPush {
-		task.NotifyOnCompletion = true
+	if err := normalizeCronTaskForSave(task); err != nil {
+		return err
 	}
 
 	updates := map[string]any{
@@ -232,6 +254,7 @@ func (a *CronTaskApi) GetTaskTypes() []lo.Tuple2[string, string] {
 		{A: "market_analysis", B: "市场分析"},
 		{A: "global_stock_index_cache", B: "全球指数缓存"},
 		{A: "stock_change_save", B: "异动数据保存"},
+		{A: CronTaskTypeStrategyScreening, B: "策略选股推送"},
 		{A: CronTaskTypeMottoPush, B: "推送格言"},
 	}
 }
@@ -338,6 +361,8 @@ func (a *CronTaskApi) executeTaskByType(ctx context.Context, task *models.CronTa
 		return a.executeStockChangeSave(ctx, task)
 	case "custom":
 		return a.executeCustomTask(ctx, task)
+	case CronTaskTypeStrategyScreening:
+		return a.executeStrategyScreening(ctx, task)
 	case CronTaskTypeMottoPush:
 		return a.executeMottoPush(ctx, task)
 	default:
