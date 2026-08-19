@@ -1,0 +1,6 @@
+{"file":".trellis/spec/backend/ai-integration-guidelines.md","reason":"约束模型配置解析、结构化输出、request-local 状态、取消和敏感信息边界。"}
+{"file":".trellis/spec/backend/error-handling.md","reason":"约束 context 取消、latest-wins、RPC 安全错误与错误链。"}
+{"file":".trellis/spec/backend/directory-structure.md","reason":"确定 AI 核心逻辑、App RPC 与跨层 DTO 的职责边界。"}
+{"file":".trellis/spec/frontend/dialog-guidelines.md","reason":"约束策略表单迁移到 AppModalShell 后的滚动、焦点、footer 和响应式行为。"}
+{"file":".trellis/spec/frontend/quality-guidelines.md","reason":"约束异步过期响应注释和与风险匹配的前端验证范围。"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"核对 Go DTO、Wails binding、Vue 状态和持久化边界的数据流一致性。"}

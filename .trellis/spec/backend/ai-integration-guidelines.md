@@ -48,6 +48,59 @@ requestConfig := WithSessionThinkingOverride(savedConfig, sessionThinking)
 - retry/fallback 是功能级显式决策。付费请求、严格单次分析和含副作用工具不得由通用 helper 隐式重试。
 - tool 使用由功能边界决定；不允许模型自行扩大数据源或调用未授权工具。
 
+## 场景：客户端 request ID 与 latest-wins 清理隔离
+
+### 1. Scope / Trigger
+
+前端提供 request ID，后端保存当前 cancel 并在请求结束时清理活动状态的 AI/RPC 流程适用。客户端 request ID 只用于关联和显式取消，不能被当作后端请求实例的唯一身份。
+
+### 2. Signatures
+
+- 活动状态：`{requestID string, generation uint64, cancel context.CancelFunc}`。
+- 注册：每个新请求在锁内递增 `generation`，保存本次 `(requestID, generation, cancel)`，再取消上一请求。
+- 清理：`clear(requestID, generation)` 只有两个值都与当前活动状态匹配时才清空。
+- 显式取消：`abort(requestID)` 只取消当前匹配的 request ID，不接受 generation 作为前端参数。
+
+### 3. Contracts
+
+- request ID 可以被重试、旧页面或异常调用方复用；内部 generation 必须单调区分每个后端请求实例。
+- 旧请求的 `defer clear`、失败回调或取消完成不得清除同 ID 新请求的 cancel。
+- generation 只存在于进程内，不进入 RPC、事件或持久化契约。
+- 关闭页面或发起更新请求时，前端仍使用 request ID 过滤响应；后端使用 ID + generation 保护内部状态。
+
+### 4. Validation & Error Matrix
+
+| 条件 | 行为 |
+| --- | --- |
+| 新请求使用不同 request ID | 取消旧请求，新 generation 成为活动状态 |
+| 新请求复用相同 request ID | 取消旧请求，但旧请求结束时不得清理新 cancel |
+| abort 的 request ID 不匹配 | 不取消当前请求，不改变活动状态 |
+| 旧请求在新请求之后返回 | 返回取消/过期结果，不产生写入或 completed 副作用 |
+
+### 5. Good / Base / Bad Cases
+
+- Good：两个同 ID 请求并发，第一条被替换后结束；第二条仍可被显式取消。
+- Base：不同 ID 请求按 latest-wins 正常替换，活动状态最终清空。
+- Bad：清理函数只比较 request ID，导致旧请求 `defer` 清除复用同 ID 的新请求句柄。
+
+### 6. Tests Required
+
+- 用 channel 控制两个同 ID 请求的开始与结束顺序，不使用 `time.Sleep`。
+- 断言第一条被取消后，活动 cancel 仍属于第二条请求。
+- 调用 `abort(requestID)`，断言第二条收到 `context.Canceled`，最终状态为空。
+- 不同 ID、错误 ID abort 和旧请求晚到仍保留原有回归覆盖。
+
+### 7. Wrong vs Correct
+
+```go
+// Wrong：同 ID 新请求会被旧请求的 defer 误清理。
+defer clear(requestID)
+
+// Correct：内部 generation 区分每个请求实例。
+generation := register(requestID, cancel)
+defer clear(requestID, generation)
+```
+
 ## Prompt、数据与安全
 
 - System prompt、用户输入、外部文档和 tool result 标明来源与信任级别；外部内容不能覆盖系统安全约束。

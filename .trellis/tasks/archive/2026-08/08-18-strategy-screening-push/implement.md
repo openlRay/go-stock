@@ -57,3 +57,21 @@ git diff --check
 - [x] 若外部响应结构与预期不一致，优先收紧响应适配测试，不在通知层散落 map cast。
 - [x] 若前端表单切换造成参数串扰，回滚新增面板分支并保持后端任务类型不可创建，避免保存半有效任务。
 - [x] 若策略任务推送失败，停用该任务类型即可，不回滚现有通用通知链路。
+
+## 7. 飞书消息 refinement（2026-08-19）
+
+- [x] 为飞书 webhook 增加 `FeishuCardOptions` 和可配置卡片入口；旧 `SendToFeishu` 保持默认 `@所有人` 的兼容行为。
+- [x] Cron 飞书通知改用绿色/红色紧凑卡片并关闭 `@所有人`；移除正文中的重复标题、状态、摘要和详情层级，失败原因单独突出。
+- [x] 策略飞书卡片底部增加完成时间、东方财富数据源和仅供参考提示，不改变钉钉 Markdown 与 PlainText 包装。
+- [x] 策略结果增加可选的涨/跌/平分布与前三主要行业概览，缺失时省略，并纳入完整行长度预算。
+- [x] 增加卡片 schema/template/mention、Cron 正文去重、失败原因、统计概览和最终长度回归测试；不运行真实飞书集成测试。
+- [x] 同步 `docs/integrations/feishu-webhook.md` 的可配置卡片入口、兼容默认值和 Cron `MentionAll=false` 契约。
+- [x] 运行 refinement 最小定点测试与 `git diff --check`，记录结果。
+
+Refinement 验证结果：
+
+- `go test ./backend/data -run 'Test(FeishuSign|AddFeishuSignature.*|FeishuMessageBuild|BuildFeishuCardMessageOptions|ParseFeishuResponse)$' -count=1`：通过；未运行 `TestSendToFeishu` 真实集成测试。
+- `go test ./backend/agent -run StrategyScreening -count=1`：通过。
+- `go test . -run '(CronTask.*Notification|BuildCronTaskFeishu|TrimLeadingMarkdownHeading)' -count=1`：通过。
+- `go vet ./backend/data ./backend/agent .`：通过。
+- `git diff --check`：通过。

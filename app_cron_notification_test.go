@@ -7,6 +7,7 @@ import (
 	"go-stock/backend/models"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/glebarez/sqlite"
 	"github.com/robfig/cron/v3"
@@ -173,6 +174,69 @@ func TestExecuteCronTaskStrategyScreeningUsesUnifiedNotificationBoundary(t *test
 	}
 	if len(eventRecorder.events) != 1 || eventRecorder.events[0].Success {
 		t.Fatalf("strategy completion events = %+v", eventRecorder.events)
+	}
+}
+
+func TestBuildCronTaskFeishuNotificationIsCompactAndDoesNotMentionAll(t *testing.T) {
+	task := &models.CronTask{Name: "策略推送", TaskType: agent.CronTaskTypeStrategyScreening}
+	result := &agent.CronTaskExecutionResult{
+		Success:     true,
+		Summary:     "策略「测试」筛选完成，命中 3 只，推送前 3 只",
+		Markdown:    "## 策略选股结果\n- **策略名称**：测试\n- **命中总数**：3\n- **实际展示**：3\n\n**股票明细**\n- **01｜000001 平安银行**",
+		PlainText:   "策略选股结果\n策略名称：测试\n命中总数：3\n实际展示：3\n股票列表：\n01｜000001 平安银行",
+		CompletedAt: time.Date(2026, 8, 19, 9, 30, 0, 0, agent.CronTaskLocation()),
+	}
+	generic := buildCronTaskNotificationPayload(task, result)
+	for _, expected := range []string{"**状态**：成功", "**结果摘要**", "### 详情", "状态：成功", "详情："} {
+		if !strings.Contains(generic.Markdown+generic.PlainText, expected) {
+			t.Fatalf("generic DingTalk/PlainText payload missing %q: %+v", expected, generic)
+		}
+	}
+	notification := buildCronTaskFeishuNotification(task, result, "2026-08-19 09:30:00")
+	if notification.Title != "策略选股完成｜策略推送" || notification.Options.HeaderTemplate != "green" {
+		t.Fatalf("success header = %+v", notification)
+	}
+	if notification.Options.MentionAll {
+		t.Fatal("cron feishu notification should not mention everyone")
+	}
+	for _, duplicate := range []string{"@所有人", "<at id=all", "## 策略选股结果", "定时任务成功", "**状态**", "**结果摘要**", "### 详情"} {
+		if strings.Contains(notification.Message, duplicate) {
+			t.Fatalf("compact feishu body should not contain %q: %q", duplicate, notification.Message)
+		}
+	}
+	for _, expected := range []string{"**策略名称**：测试", "**命中总数**：3", "完成时间：2026-08-19 09:30:00", "数据源：东方财富", "仅供参考"} {
+		if !strings.Contains(notification.Message, expected) {
+			t.Fatalf("feishu body missing %q: %q", expected, notification.Message)
+		}
+	}
+
+	failed := buildCronTaskFeishuNotification(task, &agent.CronTaskExecutionResult{
+		Success: false,
+		Summary: "所选策略不存在或已删除，请重新编辑任务",
+	}, "2026-08-19 09:31:00")
+	if failed.Options.HeaderTemplate != "red" || !strings.Contains(failed.Title, "策略选股失败") ||
+		!strings.Contains(failed.Message, "**失败原因**：所选策略不存在或已删除，请重新编辑任务") {
+		t.Fatalf("failure notification = %+v", failed)
+	}
+}
+
+func TestBuildCronTaskFeishuNotificationKeepsStrategyPayloadWithinBudget(t *testing.T) {
+	notification := buildCronTaskFeishuNotification(
+		&models.CronTask{Name: "策略推送", TaskType: agent.CronTaskTypeStrategyScreening},
+		&agent.CronTaskExecutionResult{Success: true, Summary: "筛选完成", Markdown: strings.Repeat("明", 3400)},
+		"2026-08-19 09:30:00",
+	)
+	if got := len([]rune(notification.Message)); got > 4000 {
+		t.Fatalf("final feishu markdown runes = %d, want <= 4000", got)
+	}
+}
+
+func TestTrimLeadingMarkdownHeadingPreservesHashTagText(t *testing.T) {
+	if got := trimLeadingMarkdownHeading("## 标题\n\n正文"); got != "正文" {
+		t.Fatalf("markdown heading was not trimmed: %q", got)
+	}
+	if got := trimLeadingMarkdownHeading("#策略标签\n正文"); got != "#策略标签\n正文" {
+		t.Fatalf("hash-tag text should be preserved: %q", got)
 	}
 }
 

@@ -63,8 +63,19 @@ func (FeishuAPI) SendFeishuMessage(message string) string {
 	return parseFeishuResponse(resp.String())
 }
 
-// SendToFeishu 构造 interactive 卡片消息（header 标题 + markdown 内容 + @所有人）发送到飞书机器人
+// FeishuCardOptions 控制 interactive 卡片的渠道专属展示能力。
+type FeishuCardOptions struct {
+	HeaderTemplate string
+	MentionAll     bool
+}
+
+// SendToFeishu 保留历史行为：构造 interactive 卡片并 @所有人。
 func (f FeishuAPI) SendToFeishu(title, message string) string {
+	return f.SendToFeishuWithOptions(title, message, FeishuCardOptions{MentionAll: true})
+}
+
+// SendToFeishuWithOptions 构造可配置 header 颜色和 @所有人行为的 interactive 卡片。
+func (f FeishuAPI) SendToFeishuWithOptions(title, message string, options FeishuCardOptions) string {
 	cfg := GetSettingConfig()
 	if cfg == nil || !cfg.FeishuPushEnable {
 		return "飞书推送未开启"
@@ -73,41 +84,7 @@ func (f FeishuAPI) SendToFeishu(title, message string) string {
 		return "飞书推送未配置机器人地址"
 	}
 
-	message = strutil.ReplaceWithMap(message, map[string]string{
-		"\\n":   "\n",
-		"\\r":   "\r",
-		"\\t":   "\t",
-		"\\\\n": "\n",
-		"\\\\r": "\r",
-		"\\\\t": "\t",
-	})
-
-	// 飞书卡片 JSON 2.0 协议：
-	// 必须显式声明 schema="2.0"，内容放在 body.elements 中，用 {"tag":"markdown","content":"..."} 渲染 markdown
-	// 2.0 的 @所有人语法为 <at id=all></at>（与 1.0 的 <at user_id="all">所有人</at> 不同）
-	// 文档：https://open.feishu.cn/document/feishu-cards/card-json-v2-components/content-components/rich-text
-	card := FeishuCard{
-		Schema: "2.0",
-		Header: &FeishuHeader{
-			Title: FeishuHeaderText{
-				Tag:     "plain_text",
-				Content: "go-stock " + title,
-			},
-		},
-		Body: FeishuCardBody{
-			Elements: []FeishuElement{
-				{
-					Tag:     "markdown",
-					Content: "<at id=all></at>\n" + message,
-				},
-			},
-		},
-	}
-
-	body := FeishuCardMessage{
-		MsgType: "interactive",
-		Card:    card,
-	}
+	body := buildFeishuCardMessage(title, message, options)
 
 	// 可选签名校验：FeishuSecret 非空时启用
 	if secret := strings.TrimSpace(cfg.FeishuSecret); secret != "" {
@@ -124,6 +101,41 @@ func (f FeishuAPI) SendToFeishu(title, message string) string {
 	}
 	logger.SugaredLogger.Infof("send feishu message: %s", resp.String())
 	return parseFeishuResponse(resp.String())
+}
+
+func buildFeishuCardMessage(title, message string, options FeishuCardOptions) FeishuCardMessage {
+	message = strutil.ReplaceWithMap(message, map[string]string{
+		"\\n":   "\n",
+		"\\r":   "\r",
+		"\\t":   "\t",
+		"\\\\n": "\n",
+		"\\\\r": "\r",
+		"\\\\t": "\t",
+	})
+	if options.MentionAll {
+		// JSON 2.0 的 @所有人语法与旧卡片协议不同，仅在调用方明确需要时追加。
+		message = "<at id=all></at>\n" + message
+	}
+
+	return FeishuCardMessage{
+		MsgType: "interactive",
+		Card: FeishuCard{
+			Schema: "2.0",
+			Header: &FeishuHeader{
+				Template: options.HeaderTemplate,
+				Title: FeishuHeaderText{
+					Tag:     "plain_text",
+					Content: "go-stock " + title,
+				},
+			},
+			Body: FeishuCardBody{
+				Elements: []FeishuElement{{
+					Tag:     "markdown",
+					Content: message,
+				}},
+			},
+		},
+	}
 }
 
 // genFeishuSign 飞书自定义机器人签名计算
@@ -198,7 +210,8 @@ type FeishuCardBody struct {
 }
 
 type FeishuHeader struct {
-	Title FeishuHeaderText `json:"title"`
+	Template string           `json:"template,omitempty"`
+	Title    FeishuHeaderText `json:"title"`
 }
 
 type FeishuHeaderText struct {

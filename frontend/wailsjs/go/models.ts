@@ -802,6 +802,40 @@ export namespace agent {
 	        this.content = source["content"];
 	    }
 	}
+	export class StrategyConditionAIRequest {
+	    requestId: string;
+	    instruction: string;
+	    currentQuery: string;
+	    aiConfigId: number;
+
+	    static createFrom(source: any = {}) {
+	        return new StrategyConditionAIRequest(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.requestId = source["requestId"];
+	        this.instruction = source["instruction"];
+	        this.currentQuery = source["currentQuery"];
+	        this.aiConfigId = source["aiConfigId"];
+	    }
+	}
+	export class StrategyConditionAIResult {
+	    query: string;
+	    summary: string;
+	    warnings: string[];
+
+	    static createFrom(source: any = {}) {
+	        return new StrategyConditionAIResult(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.query = source["query"];
+	        this.summary = source["summary"];
+	        this.warnings = source["warnings"];
+	    }
+	}
 
 	export class UnifiedKnowledgeHit {
 	    sourceType: string;

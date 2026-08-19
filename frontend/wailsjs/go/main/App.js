@@ -10,6 +10,10 @@ export function AbortChatWithAgent() {
   return window['go']['main']['App']['AbortChatWithAgent']();
 }
 
+export function AbortStrategyConditionGeneration(arg1) {
+  return window['go']['main']['App']['AbortStrategyConditionGeneration'](arg1);
+}
+
 export function AbortSummaryStockNews() {
   return window['go']['main']['App']['AbortSummaryStockNews']();
 }
@@ -292,6 +296,10 @@ export function Follow(arg1) {
 
 export function FollowFund(arg1) {
   return window['go']['main']['App']['FollowFund'](arg1);
+}
+
+export function GenerateStrategyCondition(arg1) {
+  return window['go']['main']['App']['GenerateStrategyCondition'](arg1);
 }
 
 export function GetAIModelCapabilities(arg1, arg2) {

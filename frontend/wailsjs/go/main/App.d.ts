@@ -11,6 +11,8 @@ export function AbortAnnouncementAIAnalysis(arg1:string):Promise<void>;
 
 export function AbortChatWithAgent():Promise<void>;
 
+export function AbortStrategyConditionGeneration(arg1:string):Promise<void>;
+
 export function AbortSummaryStockNews():Promise<void>;
 
 export function AddAllStockInfo(arg1:models.AllStockInfo):Promise<string>;
@@ -152,6 +154,8 @@ export function FindConceptCodeByName(arg1:string):Promise<string>;
 export function Follow(arg1:string):Promise<string>;
 
 export function FollowFund(arg1:string):Promise<string>;
+
+export function GenerateStrategyCondition(arg1:agent.StrategyConditionAIRequest):Promise<agent.StrategyConditionAIResult>;
 
 export function GetAIModelCapabilities(arg1:string,arg2:string):Promise<data.AIModelCapabilities>;
 

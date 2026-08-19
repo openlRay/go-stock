@@ -83,32 +83,11 @@ func TestAddFeishuSignatureRejectsInvalidMessage(t *testing.T) {
 	}
 }
 
-// TestFeishuMessageBuild 验证 interactive 卡片消息体结构（不实际发送）
+// TestFeishuMessageBuild 验证 interactive 卡片消息体结构和历史 @所有人行为（不实际发送）。
 func TestFeishuMessageBuild(t *testing.T) {
 	title := "测试标题"
 	message := "## 内容\n这是一条测试消息"
-
-	card := FeishuCard{
-		Schema: "2.0",
-		Header: &FeishuHeader{
-			Title: FeishuHeaderText{
-				Tag:     "plain_text",
-				Content: "go-stock " + title,
-			},
-		},
-		Body: FeishuCardBody{
-			Elements: []FeishuElement{
-				{
-					Tag:     "markdown",
-					Content: "<at id=all></at>\n" + message,
-				},
-			},
-		},
-	}
-	body := FeishuCardMessage{
-		MsgType: "interactive",
-		Card:    card,
-	}
+	body := buildFeishuCardMessage(title, message, FeishuCardOptions{MentionAll: true})
 
 	data, err := json.Marshal(body)
 	if err != nil {
@@ -128,6 +107,9 @@ func TestFeishuMessageBuild(t *testing.T) {
 	}
 	if gjson.Get(jsonStr, "card.header.title.content").String() != "go-stock "+title {
 		t.Fatalf("header title content mismatch: %s", jsonStr)
+	}
+	if gjson.Get(jsonStr, "card.header.template").Exists() {
+		t.Fatalf("default header template should be omitted: %s", jsonStr)
 	}
 	// 2.0 协议元素在 body.elements 中
 	elems := gjson.Get(jsonStr, "card.body.elements").Array()
@@ -163,6 +145,34 @@ func TestFeishuMessageBuild(t *testing.T) {
 	}
 	if !gjson.Get(jsonStr2, "sign").Exists() {
 		t.Fatal("sign should exist with secret")
+	}
+}
+
+func TestBuildFeishuCardMessageOptions(t *testing.T) {
+	body := buildFeishuCardMessage("策略选股完成", "**命中**：3 只", FeishuCardOptions{
+		HeaderTemplate: "green",
+		MentionAll:     false,
+	})
+	data, err := json.Marshal(body)
+	if err != nil {
+		t.Fatalf("marshal card: %v", err)
+	}
+	jsonStr := string(data)
+	if got := gjson.Get(jsonStr, "msg_type").String(); got != "interactive" {
+		t.Fatalf("msg_type = %q, body = %s", got, jsonStr)
+	}
+	if got := gjson.Get(jsonStr, "card.schema").String(); got != "2.0" {
+		t.Fatalf("card.schema = %q, body = %s", got, jsonStr)
+	}
+	if got := gjson.Get(jsonStr, "card.header.template").String(); got != "green" {
+		t.Fatalf("header.template = %q, body = %s", got, jsonStr)
+	}
+	content := gjson.Get(jsonStr, "card.body.elements.0.content").String()
+	if strings.Contains(content, "<at id=all></at>") || strings.Contains(content, "@所有人") {
+		t.Fatalf("mentionAll=false should not mention everyone: %q", content)
+	}
+	if content != "**命中**：3 只" {
+		t.Fatalf("content = %q", content)
 	}
 }
 

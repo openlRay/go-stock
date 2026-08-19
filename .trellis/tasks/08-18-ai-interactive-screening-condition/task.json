@@ -1,8 +1,8 @@
 {
-  "id": "strategy-screening-push",
-  "name": "strategy-screening-push",
-  "title": "策略定时选股推送",
-  "description": "新增可选择我的策略、配置推送数量并按 Cron 执行选股结果通知的定时任务类型。",
+  "id": "ai-interactive-screening-condition",
+  "name": "ai-interactive-screening-condition",
+  "title": "AI 交互式生成选股条件",
+  "description": "",
   "status": "in_progress",
   "dev_type": null,
   "scope": null,
@@ -19,7 +19,7 @@
   "pr_url": null,
   "subtasks": [],
   "children": [],
-  "parent": "08-16-cron-push-motto",
+  "parent": null,
   "relatedFiles": [],
   "notes": "",
   "meta": {}

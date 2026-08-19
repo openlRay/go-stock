@@ -149,3 +149,39 @@ const strategyScreeningParamsData = reactive({
 - 新类型是 switch 和任务类型列表的追加分支，不改变现有值。
 - 删除功能代码后，数据库中该类型任务会成为未知类型并安全失败；回滚前可先停用或删除这些任务。
 - 外部选股失败不会绕过 `ExecuteTask` 的运行信息持久化和统一失败通知。
+
+## 10. 飞书消息 refinement
+
+### 10.1 卡片发送契约
+
+`backend/data.FeishuAPI` 保留 `SendToFeishu(title, message)` 的历史默认行为，同时增加带选项的卡片入口：
+
+```go
+type FeishuCardOptions struct {
+    HeaderTemplate string
+    MentionAll     bool
+}
+```
+
+- `SendToFeishu` 继续默认 `MentionAll=true`，避免影响价格提醒、Agent tool 等既有调用方。
+- Cron 使用新入口，成功传 `green`、失败传 `red`，并显式设置 `MentionAll=false`。
+- 卡片 JSON 2.0 schema、header template 和 mention 语法由 `backend/data` 持有；`backend/agent` 不依赖飞书供应商类型。
+
+### 10.2 Cron 飞书专属包装
+
+- 钉钉 Markdown 与本地/Web PlainText 继续使用原统一标题、状态、完成时间、摘要和详情包装。
+- 飞书正文只保留一次有效内容：卡片 header 表达任务与成功/失败状态，正文成功时直接放渠道无关详情，失败时只展示“失败原因”。详情首个重复 Markdown 标题在飞书边界移除。
+- 策略卡片底部追加完成时间、`数据源：东方财富` 和“选股结果仅供参考，不构成投资建议”。
+
+### 10.3 策略概览
+
+- 基于所有命中股票中可解析的 `CHANGE_RATE` 计算涨、跌、平数量；只有部分股票具备该字段时展示覆盖数，完全缺失时不显示该行。
+- 对非空 `INDUSTRY` 聚合计数，按数量降序、首次出现顺序稳定排序，仅展示前三个主要行业；完全缺失时不显示该行。
+- 概览参与 Markdown/PlainText 的同一最终预算计算；列表仍逐条试算并仅追加完整股票行，概览变长时允许减少实际展示数量。
+
+### 10.4 refinement 验证
+
+- `backend/data/feishu_api_test.go`：纯构造验证 schema、header template、兼容的 mention-all 默认值和 `MentionAll=false`。
+- `app_cron_notification_test.go`：验证 Cron 飞书正文无 `@all` 和重复包装、失败原因清晰、底部信息完整及最终长度预算。
+- `backend/agent/cron_strategy_screening_test.go`：验证涨跌分布、主要行业排序/截断、缺失字段省略和丰富行情下的长度降级。
+- 所有测试只构造本地载荷或使用内存数据库，不发送真实飞书消息、不访问东方财富 live API。

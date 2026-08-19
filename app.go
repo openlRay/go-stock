@@ -55,6 +55,13 @@ type App struct {
 	announcementMu     sync.Mutex
 	announcementCancel context.CancelFunc
 	announcementReqID  string
+
+	strategyAIMu         sync.Mutex
+	strategyAICancel     context.CancelFunc
+	strategyAIReqID      string
+	strategyAIGeneration uint64
+	strategyAIGenerate   func(context.Context, agent.StrategyConditionAIRequest) (*agent.StrategyConditionAIResult, error)
+
 	stockAlertMu       sync.Mutex
 	stockAlertLastSent map[string]time.Time
 	priceAtAlertReset  map[string]float64

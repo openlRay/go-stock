@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"go-stock/backend/data"
 	"go-stock/backend/models"
+	"math"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -26,6 +28,7 @@ const (
 	strategyScreeningStockNameRunes    = 24
 	strategyScreeningMetricRunes       = 16
 	strategyScreeningIndustryRunes     = 16
+	strategyScreeningIndustryTopCount  = 3
 )
 
 var strategyScreeningPushLimits = map[int]struct{}{
@@ -137,6 +140,20 @@ type strategyScreeningStock struct {
 	Industry     string
 }
 
+type strategyScreeningOverview struct {
+	UpCount              int
+	DownCount            int
+	FlatCount            int
+	ChangeAvailableCount int
+	Industries           []strategyScreeningIndustryCount
+}
+
+type strategyScreeningIndustryCount struct {
+	Name       string
+	Count      int
+	FirstIndex int
+}
+
 func parseStrategyScreeningSearchResponse(response map[string]any) ([]strategyScreeningStock, error) {
 	if response == nil {
 		return nil, newCronTaskPublicError("选股服务返回数据异常，请稍后重试", nil)
@@ -245,18 +262,19 @@ func buildStrategyScreeningContent(strategyName, query string, stocks []strategy
 	if pushLimit > 0 && targetCount > pushLimit {
 		targetCount = pushLimit
 	}
+	overview := summarizeStrategyScreeningStocks(stocks)
 	displayCount := 0
 	for displayCount < targetCount {
-		candidate := renderStrategyScreeningContent(strategyName, query, stocks, pushLimit, displayCount+1)
+		candidate := renderStrategyScreeningContent(strategyName, query, stocks, overview, pushLimit, displayCount+1)
 		if runeCount(candidate.Markdown) > strategyScreeningDetailMaxRunes || runeCount(candidate.PlainText) > strategyScreeningDetailMaxRunes {
 			break
 		}
 		displayCount++
 	}
-	return renderStrategyScreeningContent(strategyName, query, stocks, pushLimit, displayCount)
+	return renderStrategyScreeningContent(strategyName, query, stocks, overview, pushLimit, displayCount)
 }
 
-func renderStrategyScreeningContent(strategyName, query string, stocks []strategyScreeningStock, pushLimit, displayCount int) cronTaskContent {
+func renderStrategyScreeningContent(strategyName, query string, stocks []strategyScreeningStock, overview strategyScreeningOverview, pushLimit, displayCount int) cronTaskContent {
 	total := len(stocks)
 	summary := ""
 	switch {
@@ -282,6 +300,26 @@ func renderStrategyScreeningContent(strategyName, query string, stocks []strateg
 		fmt.Sprintf("命中总数：%d", total),
 		fmt.Sprintf("实际展示：%d", displayCount),
 	}
+	if overview.ChangeAvailableCount > 0 {
+		coverage := ""
+		if overview.ChangeAvailableCount < total {
+			coverage = fmt.Sprintf("（覆盖 %d/%d 只）", overview.ChangeAvailableCount, total)
+		}
+		markdownLines = append(markdownLines, fmt.Sprintf("- **涨跌分布**：涨 %d｜跌 %d｜平 %d%s",
+			overview.UpCount, overview.DownCount, overview.FlatCount, coverage))
+		plainLines = append(plainLines, fmt.Sprintf("涨跌分布：涨 %d｜跌 %d｜平 %d%s",
+			overview.UpCount, overview.DownCount, overview.FlatCount, coverage))
+	}
+	if len(overview.Industries) > 0 {
+		markdownIndustries := make([]string, 0, len(overview.Industries))
+		plainIndustries := make([]string, 0, len(overview.Industries))
+		for _, industry := range overview.Industries {
+			markdownIndustries = append(markdownIndustries, fmt.Sprintf("%s %d", escapeMarkdown(industry.Name), industry.Count))
+			plainIndustries = append(plainIndustries, fmt.Sprintf("%s %d", industry.Name, industry.Count))
+		}
+		markdownLines = append(markdownLines, "- **主要行业**："+strings.Join(markdownIndustries, "｜"))
+		plainLines = append(plainLines, "主要行业："+strings.Join(plainIndustries, "｜"))
+	}
 	if displayCount > 0 {
 		// 飞书和钉钉的 Markdown 子集都能稳定渲染列表；序号后不使用点号，避免飞书解析成嵌套列表。
 		markdownLines = append(markdownLines, "", "**股票明细**")
@@ -296,6 +334,70 @@ func renderStrategyScreeningContent(strategyName, query string, stocks []strateg
 		Summary:   summary,
 		Markdown:  strings.Join(markdownLines, "\n"),
 		PlainText: strings.Join(plainLines, "\n"),
+	}
+}
+
+func summarizeStrategyScreeningStocks(stocks []strategyScreeningStock) strategyScreeningOverview {
+	overview := strategyScreeningOverview{}
+	industries := make(map[string]strategyScreeningIndustryCount)
+	for index, stock := range stocks {
+		if direction, ok := strategyScreeningChangeDirection(stock.ChangeRate); ok {
+			overview.ChangeAvailableCount++
+			switch {
+			case direction > 0:
+				overview.UpCount++
+			case direction < 0:
+				overview.DownCount++
+			default:
+				overview.FlatCount++
+			}
+		}
+
+		industry := truncateRunes(normalizeInlineText(stock.Industry), strategyScreeningIndustryRunes)
+		if industry == "" {
+			continue
+		}
+		stat, exists := industries[industry]
+		if !exists {
+			stat = strategyScreeningIndustryCount{Name: industry, FirstIndex: index}
+		}
+		stat.Count++
+		industries[industry] = stat
+	}
+
+	overview.Industries = make([]strategyScreeningIndustryCount, 0, len(industries))
+	for _, stat := range industries {
+		overview.Industries = append(overview.Industries, stat)
+	}
+	sort.SliceStable(overview.Industries, func(left, right int) bool {
+		if overview.Industries[left].Count != overview.Industries[right].Count {
+			return overview.Industries[left].Count > overview.Industries[right].Count
+		}
+		return overview.Industries[left].FirstIndex < overview.Industries[right].FirstIndex
+	})
+	if len(overview.Industries) > strategyScreeningIndustryTopCount {
+		overview.Industries = overview.Industries[:strategyScreeningIndustryTopCount]
+	}
+	return overview
+}
+
+func strategyScreeningChangeDirection(value string) (int, bool) {
+	value = strings.TrimSpace(strings.TrimSuffix(normalizeInlineText(value), "%"))
+	value = strings.ReplaceAll(value, ",", "")
+	if value == "" {
+		return 0, false
+	}
+	change, err := strconv.ParseFloat(value, 64)
+	if err != nil || math.IsNaN(change) || math.IsInf(change, 0) {
+		return 0, false
+	}
+	switch {
+	case change > 0:
+		return 1, true
+	case change < 0:
+		return -1, true
+	default:
+		return 0, true
 	}
 }
 

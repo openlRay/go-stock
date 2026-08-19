@@ -44,9 +44,12 @@ func addFeishuSignature(message, secret string, now time.Time) (string, error)
 ## 两条发送路径
 
 - `SendFeishuMessage` 接收 UI 测试、价格提醒等调用方提供的 JSON object。
-- `SendToFeishu` 发送后端生成的 interactive card。
+- `SendToFeishu` 发送后端生成的 interactive card，并保留历史默认行为：在正文开头追加 `@所有人`。
+- `SendToFeishuWithOptions` 供需要控制展示语义的后端调用方使用：`HeaderTemplate` 设置卡片头部颜色，`MentionAll` 决定是否追加 `@所有人`。Cron 完成通知必须显式使用 `MentionAll=false`，成功与失败分别使用绿色、红色 header template。
 
 两条路径必须复用同一签名逻辑。Raw JSON 必须解析为 object；`null`、数组或非法 JSON 在联网前拒绝。调用方传入的旧 `timestamp` 和 `sign` 必须被当前值覆盖，其他消息字段保持不变。
+
+卡片选项只属于飞书发送边界。策略筛选、定时任务等领域层继续生成渠道无关的 Markdown/PlainText，不得依赖 `FeishuCardOptions`。
 
 ## 错误与安全
 
@@ -65,5 +68,6 @@ func addFeishuSignature(message, secret string, now time.Time) (string, error)
 - 固定时间和 Secret 必须得到确定的 timestamp/sign。
 - 注入签名后原消息字段保持不变，旧签名被替换。
 - 非法 JSON、`null` 和数组在联网前失败。
+- 卡片构造测试必须覆盖 JSON 2.0 schema、header template、默认 mention-all 兼容行为和 `MentionAll=false`。
 - `19021` 返回可执行的配置与时钟排查提示。
 - 常规自动化测试不得运行会真实发送外部消息的 `TestSendToFeishu`；只有用户明确允许该副作用时才能运行。

@@ -6,6 +6,8 @@ import {Environment} from "../../wailsjs/runtime"
 import {BookmarkOutline, TrashOutline, CreateOutline, AddOutline, FolderOpenOutline} from "@vicons/ionicons5";
 import {EventsEmit} from "../../wailsjs/runtime";
 import StockLightweightKlineChart from "./StockLightweightKlineChart.vue";
+import AppModalShell from './common/AppModalShell.vue'
+import StrategyConditionAssistant from './StrategyConditionAssistant.vue'
 
 const message = useMessage()
 const search = ref('')
@@ -17,6 +19,8 @@ const traceInfo = ref('')
 const tableScrollX = ref(2800)
 const leftTab = ref('hot')
 const showSaveModal = ref(false)
+const savingStrategy = ref(false)
+const strategyAssistantSessionKey = ref(0)
 const darkTheme = ref(false)
 const klineModalShow = ref(false)
 const klineStockCode = ref('')
@@ -323,10 +327,12 @@ function openSaveModal(isEdit = false, strategy = null) {
     saveForm.description = ''
     saveForm.sortOrder = 0
   }
+  strategyAssistantSessionKey.value += 1
   showSaveModal.value = true
 }
 
-function handleSaveStrategy() {
+async function handleSaveStrategy() {
+  if (savingStrategy.value) return
   if (!saveForm.name.trim()) {
     message.warning('请输入策略名称')
     return
@@ -335,19 +341,28 @@ function handleSaveStrategy() {
     message.warning('请输入选股条件')
     return
   }
-  SaveCustomStrategy({
-    id: saveForm.id || 0,
-    name: saveForm.name,
-    query: saveForm.query,
-    description: saveForm.description,
-    sortOrder: saveForm.sortOrder,
-  }).then(res => {
+  savingStrategy.value = true
+  try {
+    const res = await SaveCustomStrategy({
+      id: saveForm.id || 0,
+      name: saveForm.name,
+      query: saveForm.query,
+      description: saveForm.description,
+      sortOrder: saveForm.sortOrder,
+    })
     message.success(res)
     showSaveModal.value = false
-    loadCustomStrategies()
-  }).catch(err => {
+    await loadCustomStrategies()
+  } catch (err) {
     message.error(err)
-  })
+  } finally {
+    savingStrategy.value = false
+  }
+}
+
+function handleApplySuggestedQuery(query: string) {
+  saveForm.query = query
+  message.success('AI 建议已应用到选股条件，点击“保存”后才会持久化')
 }
 
 function handleDeleteStrategy(id) {
@@ -510,20 +525,56 @@ function openCenteredWindow(url, width, height) {
     </n-gi>
   </n-grid>
 
-  <n-modal v-model:show="showSaveModal" preset="dialog" :title="saveForm.id ? '编辑策略' : '保存策略'" positive-text="保存" negative-text="取消"
-           @positive-click="handleSaveStrategy" style="width: 500px;">
-    <n-form label-placement="left" label-width="80">
+  <AppModalShell
+    v-model:show="showSaveModal"
+    :title="saveForm.id ? '编辑策略' : '保存策略'"
+    width="760px"
+  >
+    <template #title>
+      <div class="strategy-modal-title">
+        <span class="strategy-modal-title__icon" aria-hidden="true">i</span>
+        {{ saveForm.id ? '编辑策略' : '保存策略' }}
+      </div>
+    </template>
+
+    <n-form label-placement="left" label-width="96" :show-feedback="false" class="strategy-form">
       <n-form-item label="策略名称">
         <n-input v-model:value="saveForm.name" placeholder="请输入策略名称"/>
       </n-form-item>
       <n-form-item label="选股条件">
-        <n-input v-model:value="saveForm.query" type="textarea" :rows="3" placeholder="请输入选股条件"/>
+        <div class="strategy-query-section">
+          <div class="strategy-query-editor">
+            <span class="strategy-query-editor__badge">当前条件</span>
+            <n-input
+              v-model:value="saveForm.query"
+              type="textarea"
+              :autosize="{ minRows: 3, maxRows: 7 }"
+              placeholder="请输入选股条件"
+            />
+          </div>
+          <StrategyConditionAssistant
+            :current-query="saveForm.query"
+            :active="showSaveModal"
+            :session-key="strategyAssistantSessionKey"
+            @apply="handleApplySuggestedQuery"
+          />
+        </div>
       </n-form-item>
       <n-form-item label="策略描述">
-        <n-input v-model:value="saveForm.description" type="textarea" :rows="2" placeholder="可选，对策略的简要说明"/>
+        <n-input
+          v-model:value="saveForm.description"
+          type="textarea"
+          :autosize="{ minRows: 2, maxRows: 5 }"
+          placeholder="可选，对策略的简要说明"
+        />
       </n-form-item>
     </n-form>
-  </n-modal>
+
+    <template #footer>
+      <n-button :disabled="savingStrategy" @click="showSaveModal = false">取消</n-button>
+      <n-button type="primary" :loading="savingStrategy" @click="handleSaveStrategy">保存</n-button>
+    </template>
+  </AppModalShell>
 
   <n-modal
     v-model:show="klineModalShow"
@@ -553,4 +604,68 @@ function openCenteredWindow(url, width, height) {
 </template>
 
 <style scoped>
+.strategy-modal-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.strategy-modal-title__icon {
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  background: #18a058;
+  border-radius: 50%;
+  font: 700 21px/1 Georgia, serif;
+}
+
+.strategy-form { padding-bottom: 16px; }
+
+.strategy-query-section {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.strategy-query-editor {
+  position: relative;
+  padding: 38px 12px 10px;
+  background: #fff;
+  border: 1px solid #d9dee7;
+  border-radius: 9px;
+}
+
+.strategy-query-editor:focus-within {
+  border-color: #18a058;
+  box-shadow: 0 0 0 2px rgb(24 160 88 / 12%);
+}
+
+.strategy-query-editor__badge {
+  position: absolute;
+  top: 10px;
+  left: 14px;
+  z-index: 1;
+  padding: 3px 10px;
+  color: #168a50;
+  background: #edf8f2;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.strategy-query-editor :deep(.n-input) {
+  --n-border: 0 !important;
+  --n-border-hover: 0 !important;
+  --n-border-focus: 0 !important;
+  --n-box-shadow-focus: none !important;
+}
+
+@media (max-width: 640px) {
+  .strategy-form :deep(.n-form-item) { display: block; }
+  .strategy-form :deep(.n-form-item-label) { width: auto !important; margin-bottom: 6px; }
+}
 </style>

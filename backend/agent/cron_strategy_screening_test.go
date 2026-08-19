@@ -7,6 +7,7 @@ import (
 	"go-stock/backend/data"
 	"go-stock/backend/db"
 	"go-stock/backend/models"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -207,13 +208,47 @@ func TestBuildStrategyScreeningContentIncludesAvailableMarketDetails(t *testing.
 	}
 }
 
+func TestBuildStrategyScreeningContentIncludesTrendAndIndustryOverview(t *testing.T) {
+	stocks := []strategyScreeningStock{
+		{Code: "000001", Name: "股票1", ChangeRate: "2.5%", Industry: "半导体"},
+		{Code: "000002", Name: "股票2", ChangeRate: "-1.2", Industry: "银行"},
+		{Code: "000003", Name: "股票3", ChangeRate: "0", Industry: "半导体"},
+		{Code: "000004", Name: "股票4", ChangeRate: "+3.1", Industry: "汽车"},
+		{Code: "000005", Name: "股票5", Industry: "医药"},
+	}
+	content := buildStrategyScreeningContent("策略", "条件", stocks, 1)
+	if !strings.Contains(content.Markdown, "- **涨跌分布**：涨 2｜跌 1｜平 1（覆盖 4/5 只）") ||
+		!strings.Contains(content.PlainText, "涨跌分布：涨 2｜跌 1｜平 1（覆盖 4/5 只）") {
+		t.Fatalf("trend overview missing: %+v", content)
+	}
+	if !strings.Contains(content.Markdown, "- **主要行业**：半导体 2｜银行 1｜汽车 1") ||
+		!strings.Contains(content.PlainText, "主要行业：半导体 2｜银行 1｜汽车 1") {
+		t.Fatalf("industry overview missing: %+v", content)
+	}
+	if strings.Contains(content.Markdown, "医药 1") {
+		t.Fatalf("industry overview should only include the top three industries: %q", content.Markdown)
+	}
+	missingOverview := buildStrategyScreeningContent("策略", "条件", makeStrategyScreeningTestStocks(2), 20).Markdown
+	if strings.Contains(missingOverview, "涨跌分布") || strings.Contains(missingOverview, "主要行业") {
+		t.Fatalf("missing market fields should not render empty overview rows: %q", missingOverview)
+	}
+}
+
 func TestBuildStrategyScreeningContentAllAndLengthFallback(t *testing.T) {
 	complete := buildStrategyScreeningContent("策略", "条件", makeStrategyScreeningTestStocks(3), 0)
 	if !strings.Contains(complete.Summary, "命中并推送 3 只") || strategyScreeningPlainRowCount(complete.PlainText) != 3 {
 		t.Fatalf("complete all content = %+v", complete)
 	}
 
-	limited := buildStrategyScreeningContent("策略", strings.Repeat("很长的选股条件", 200), makeStrategyScreeningTestStocks(5000), 0)
+	longStocks := makeStrategyScreeningTestStocks(5000)
+	for index := range longStocks {
+		longStocks[index].LatestPrice = "123.45"
+		longStocks[index].ChangeRate = fmt.Sprintf("%d", index%3-1)
+		longStocks[index].TurnoverRate = "8.88"
+		longStocks[index].VolumeRatio = "1.23"
+		longStocks[index].Industry = fmt.Sprintf("行业%d", index%5)
+	}
+	limited := buildStrategyScreeningContent("策略", strings.Repeat("很长的选股条件", 200), longStocks, 0)
 	displayed := strategyScreeningPlainRowCount(limited.PlainText)
 	if displayed <= 0 || displayed >= 5000 {
 		t.Fatalf("fallback displayed rows = %d", displayed)
@@ -358,7 +393,11 @@ func strategyScreeningPlainRowCount(plainText string) int {
 	lines := strings.Split(plainText, "\n")
 	count := 0
 	for _, line := range lines {
-		if strings.Contains(line, "｜") {
+		separator := strings.Index(line, "｜")
+		if separator <= 0 {
+			continue
+		}
+		if _, err := strconv.Atoi(line[:separator]); err == nil {
 			count++
 		}
 	}

@@ -1,0 +1,6 @@
+{"file":".trellis/spec/backend/quality-guidelines.md","reason":"检查新增公共服务测试、并发安全、注释和最小验证范围。"}
+{"file":".trellis/spec/backend/ai-integration-guidelines.md","reason":"复核模型输出校验、取消、配置副本和日志脱敏。"}
+{"file":".trellis/spec/frontend/dialog-guidelines.md","reason":"复核弹框焦点、滚动、主次操作和窄屏可用性。"}
+{"file":".trellis/spec/frontend/quality-guidelines.md","reason":"复核 latest-request-wins 注释、构建与浏览器验收选择。"}
+{"file":".trellis/spec/guides/code-reuse-thinking-guide.md","reason":"检查是否重复实现已有 AI 配置、弹框或 JSON 解析能力。"}
+{"file":".trellis/spec/guides/cross-layer-thinking-guide.md","reason":"检查 RPC DTO、生成绑定和前端消费字段完整一致。"}
