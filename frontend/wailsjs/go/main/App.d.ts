@@ -267,6 +267,12 @@ export function GetFundRanking(arg1:string,arg2:string,arg3:string,arg4:string,a
 
 export function GetFundTop10Holdings(arg1:string):Promise<Array<data.FundHoldingStock>>;
 
+export function GetFuturesMemberRank(arg1:string,arg2:string):Promise<Array<data.FuturesMemberRank>>;
+
+export function GetFuturesPositionTrend(arg1:string,arg2:string,arg3:number):Promise<data.FuturesPositionResp>;
+
+export function GetGlobalIndexTrend(arg1:string):Promise<data.GlobalIndexTrendResult>;
+
 export function GetGroupList():Promise<Array<data.Group>>;
 
 export function GetGroupStockList(arg1:number):Promise<Array<data.GroupStock>>;
@@ -292,6 +298,8 @@ export function GetKBGraphBuildStatus(arg1:string):Promise<agent.KBGraphBuildSta
 export function GetKBVectorizingStatus(arg1:string):Promise<agent.KBVectorizingStatus>;
 
 export function GetKnowledgeBase(arg1:string):Promise<agent.KnowledgeBaseInfo>;
+
+export function GetKoreaDayKLine(arg1:string,arg2:number):Promise<any>;
 
 export function GetLatestTradingDay():Promise<string>;
 
@@ -566,6 +574,8 @@ export function ShareText(arg1:string,arg2:string):Promise<string>;
 export function StartAnnouncementAIAnalysis(arg1:models.AnnouncementAIAnalysisRequest):Promise<string>;
 
 export function StartFeishuBot():Promise<string>;
+
+export function StartMCPOAuth(arg1:number):Promise<string>;
 
 export function StockNotice(arg1:string):Promise<Array<any>>;
 
