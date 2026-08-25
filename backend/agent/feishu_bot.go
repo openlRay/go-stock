@@ -666,25 +666,29 @@ const maxProgressStepRunes = 120
 //	✅ GetStockRealTimePrice 返回结果（320字）
 //	📋 正在拆解任务，制定 TODO 计划...
 type progressReporter struct {
-	bot       *FeishuBot
 	cardID    string
 	startedAt time.Time
+	patch     func(cardID, content string) error
 
 	mu        sync.Mutex
-	steps     []string // 最近 maxProgressSteps 条（每条已截断）
-	toolCalls int      // 🔧 工具调用次数
-	dirty     bool     // 有未推送的更新
+	patchMu   sync.Mutex // 串行化网络 PATCH；Stop 用它等待在途请求，避免旧进度覆盖最终回复
+	steps     []string   // 最近 maxProgressSteps 条（每条已截断）
+	toolCalls int        // 🔧 工具调用次数
+	dirty     bool       // 有未推送的更新
 	lastPatch time.Time
 	stopped   bool
 }
 
 // newProgressReporter 创建进度上报器；cardID 为空时所有操作均为 no-op。
 func newProgressReporter(bot *FeishuBot, cardID string) *progressReporter {
-	return &progressReporter{
-		bot:       bot,
+	reporter := &progressReporter{
 		cardID:    cardID,
 		startedAt: time.Now(),
 	}
+	if bot != nil {
+		reporter.patch = bot.patchCardContent
+	}
+	return reporter
 }
 
 // Step 记录一条步骤（collectAgentReplyWithProgress 回调）。
@@ -718,13 +722,14 @@ func (r *progressReporter) Step(step string) {
 
 // Flush 把当前聚合状态 PATCH 到进度卡片。
 //   - force=true 跳过限频（如 Loop 定时器触发）
-//   - 无脏数据或已 Stop 时为 no-op
+//   - force=true 时即使无新步骤也刷新已用时
+//   - 已 Stop 时为 no-op
 func (r *progressReporter) Flush(force bool) {
 	if r == nil || r.cardID == "" {
 		return
 	}
 	r.mu.Lock()
-	if r.stopped || !r.dirty {
+	if r.stopped || (!r.dirty && !force) {
 		r.mu.Unlock()
 		return
 	}
@@ -738,7 +743,17 @@ func (r *progressReporter) Flush(force bool) {
 	content := r.renderLocked()
 	r.mu.Unlock()
 
-	if err := r.bot.patchCardContent(r.cardID, content); err != nil {
+	// 网络请求必须串行；拿到 patchMu 后再次检查 stopped，覆盖
+	// “Flush 已准备好内容、Stop 恰好先完成”的窗口。
+	r.patchMu.Lock()
+	defer r.patchMu.Unlock()
+	r.mu.Lock()
+	stopped := r.stopped
+	r.mu.Unlock()
+	if stopped || r.patch == nil {
+		return
+	}
+	if err := r.patch(r.cardID, content); err != nil {
 		logger.SugaredLogger.Debugf("feishu bot progress patch failed: %v", err)
 	}
 }
@@ -758,7 +773,8 @@ func (r *progressReporter) Loop(done <-chan struct{}) {
 	}
 }
 
-// Stop 停止后续刷新（防止定时 PATCH 覆盖 finalize 回填的最终内容）。
+// Stop 停止后续刷新，并等待已在网络中的 PATCH 完成。
+// 调用返回后 finalize 才能安全回填最终内容，不会再被旧进度覆盖。
 func (r *progressReporter) Stop() {
 	if r == nil {
 		return
@@ -766,6 +782,9 @@ func (r *progressReporter) Stop() {
 	r.mu.Lock()
 	r.stopped = true
 	r.mu.Unlock()
+
+	r.patchMu.Lock()
+	r.patchMu.Unlock()
 }
 
 // renderLocked 渲染卡片 markdown（调用方需持锁）。

@@ -3,6 +3,7 @@ package agent
 import (
 	"encoding/json"
 	"fmt"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -299,6 +300,73 @@ func TestProgressReporter_RateLimitedFlush(t *testing.T) {
 	assert.Len(t, r.steps, 2)
 	assert.False(t, r.dirty)
 	r.mu.Unlock()
+}
+
+// TestProgressReporter_ForceFlushWithoutDirty 验证定时刷新在没有新步骤时仍会更新已用时。
+func TestProgressReporter_ForceFlushWithoutDirty(t *testing.T) {
+	r := newProgressReporter(&FeishuBot{}, "om_card")
+	var patches atomic.Int32
+	r.patch = func(cardID, content string) error {
+		patches.Add(1)
+		assert.Equal(t, "om_card", cardID)
+		assert.Contains(t, content, "已用时")
+		return nil
+	}
+
+	r.Flush(true)
+	assert.Equal(t, int32(1), patches.Load())
+}
+
+// TestProgressReporter_StopWaitsForInFlightPatch 验证 Stop 返回前会等待在途 PATCH，
+// 从而保证随后写入的最终回复不会被较慢的旧进度覆盖。
+func TestProgressReporter_StopWaitsForInFlightPatch(t *testing.T) {
+	r := newProgressReporter(&FeishuBot{}, "om_card")
+	patchStarted := make(chan struct{})
+	releasePatch := make(chan struct{})
+	patchDone := make(chan struct{})
+	r.patch = func(string, string) error {
+		close(patchStarted)
+		<-releasePatch
+		close(patchDone)
+		return nil
+	}
+
+	flushDone := make(chan struct{})
+	go func() {
+		r.Flush(true)
+		close(flushDone)
+	}()
+	<-patchStarted
+
+	stopDone := make(chan struct{})
+	go func() {
+		r.Stop()
+		close(stopDone)
+	}()
+
+	deadline := time.Now().Add(time.Second)
+	for {
+		r.mu.Lock()
+		stopped := r.stopped
+		r.mu.Unlock()
+		if stopped {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("Stop 未进入停止状态")
+		}
+		runtime.Gosched()
+	}
+	select {
+	case <-stopDone:
+		t.Fatal("Stop 在在途 PATCH 完成前返回")
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	close(releasePatch)
+	<-patchDone
+	<-flushDone
+	<-stopDone
 }
 
 // TestProgressReporter_StepWindow 只保留最近 maxProgressSteps 条步骤
