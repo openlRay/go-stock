@@ -603,7 +603,7 @@ function openCenteredWindow(url, width, height) {
   </n-modal>
 </template>
 
-<style scoped>
+<style scoped lang="less">
 .strategy-modal-title {
   display: flex;
   align-items: center;
@@ -622,7 +622,13 @@ function openCenteredWindow(url, width, height) {
   font: 700 21px/1 Georgia, serif;
 }
 
-.strategy-form { padding-bottom: 16px; }
+.strategy-form { 
+  padding-bottom: 16px;
+
+  .n-form-item {
+    margin-bottom: 16px;
+  }
+}
 
 .strategy-query-section {
   width: 100%;
