@@ -203,6 +203,145 @@ func TestCollectAgentReply_MixedMessages(t *testing.T) {
 	assert.NotContains(t, got, "调用工具")
 }
 
+// TestCollectAgentReplyWithProgress_StepCallback 仅 [STEP] 行触发进度回调（剥前缀），
+// 普通思考流不回调；Content 拼接不受影响。
+func TestCollectAgentReplyWithProgress_StepCallback(t *testing.T) {
+	ch := make(chan *schema.Message, 6)
+	ch <- &schema.Message{Role: schema.Assistant, ReasoningContent: "首先我需要思考一下"} // 普通思考流，不回调
+	ch <- &schema.Message{Role: schema.Assistant, ReasoningContent: "[STEP]🧠 DeepAgents 模式启动，正在规划任务并调用工具分析...\n"}
+	ch <- &schema.Message{Role: schema.Assistant, ReasoningContent: "[STEP]🔧 调用工具：GetStockRealTimePrice(sh600519)\n"}
+	ch <- &schema.Message{Role: schema.Assistant, Content: "贵州茅台当前"}
+	ch <- &schema.Message{Role: schema.Assistant, Content: "股价 1500 元"}
+	close(ch)
+
+	var steps []string
+	got := collectAgentReplyWithProgress(ch, func(step string) { steps = append(steps, step) })
+	assert.Equal(t, "贵州茅台当前股价 1500 元", got)
+	assert.Equal(t, []string{
+		"🧠 DeepAgents 模式启动，正在规划任务并调用工具分析...",
+		"🔧 调用工具：GetStockRealTimePrice(sh600519)",
+	}, steps)
+}
+
+// TestCollectAgentReplyWithProgress_NilCallback onStep 为 nil 时行为与 collectAgentReply 一致
+func TestCollectAgentReplyWithProgress_NilCallback(t *testing.T) {
+	ch := make(chan *schema.Message, 2)
+	ch <- &schema.Message{Role: schema.Assistant, ReasoningContent: "[STEP]🔧 调用工具：X"}
+	ch <- &schema.Message{Role: schema.Assistant, Content: "回复"}
+	close(ch)
+	assert.Equal(t, "回复", collectAgentReplyWithProgress(ch, nil))
+}
+
+// TestCollectAgentReplyWithProgress_MultiLineStep 一条 ReasoningContent 含多行 [STEP] 逐行回调
+func TestCollectAgentReplyWithProgress_MultiLineStep(t *testing.T) {
+	ch := make(chan *schema.Message, 1)
+	ch <- &schema.Message{Role: schema.Assistant, ReasoningContent: "[STEP]📋 制定计划...\n[STEP]⚡ 执行步骤 1...\n"}
+	close(ch)
+
+	var steps []string
+	collectAgentReplyWithProgress(ch, func(step string) { steps = append(steps, step) })
+	assert.Equal(t, []string{"📋 制定计划...", "⚡ 执行步骤 1..."}, steps)
+}
+
+// TestCollectAgentReplyWithProgress_MultiLinePlanBlock write_todos 任务清单是
+// 单条消息内的多行内容（首行 [STEP]📝，其余行无前缀），应作为一个整体回调而非拆散/丢弃
+func TestCollectAgentReplyWithProgress_MultiLinePlanBlock(t *testing.T) {
+	ch := make(chan *schema.Message, 1)
+	ch <- &schema.Message{Role: schema.Assistant, ReasoningContent: "[STEP]📝 任务规划：\n1. 查询股价\n2. 查询新闻\n3. 汇总分析\n"}
+	close(ch)
+
+	var steps []string
+	collectAgentReplyWithProgress(ch, func(step string) { steps = append(steps, step) })
+	assert.Equal(t, []string{"📝 任务规划：\n1. 查询股价\n2. 查询新闻\n3. 汇总分析"}, steps)
+}
+
+// TestProgressReporter_StepAndCount 🔧 步骤计入工具调用次数；cardID 为空时 no-op
+func TestProgressReporter_StepAndCount(t *testing.T) {
+	r := newProgressReporter(&FeishuBot{}, "om_card")
+	r.Step("🔧 调用工具：GetStockRealTimePrice(sh600519)")
+	r.Step("✅ GetStockRealTimePrice 返回结果（320字）")
+	r.Step("📋 制定计划...")
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	assert.Equal(t, 1, r.toolCalls)
+	assert.Len(t, r.steps, 3)
+	assert.True(t, r.dirty)
+	assert.Contains(t, r.renderLocked(), "工具调用 1 次")
+	assert.Contains(t, r.renderLocked(), "已用时 0秒")
+
+	// cardID 为空：no-op
+	empty := newProgressReporter(&FeishuBot{}, "")
+	empty.Step("🔧 X")
+	assert.Equal(t, 0, empty.toolCalls)
+}
+
+// TestProgressReporter_RateLimitedFlush 限频窗口内的 Step 只标脏不 PATCH；
+// Flush(true) 强制刷新；Stop 后 Flush/Step 均为 no-op
+func TestProgressReporter_RateLimitedFlush(t *testing.T) {
+	r := newProgressReporter(&FeishuBot{}, "om_card") // apiClient nil → patch 报错但状态正常流转
+
+	r.Step("步骤1") // 首次 → due → Flush（patch 失败，lastPatch 已更新）
+	assert.False(t, r.dirty)
+
+	r.Step("步骤2") // 限频窗口内 → 标脏不 Flush
+	assert.True(t, r.dirty)
+
+	r.Flush(false) // 仍在窗口内 → no-op
+	assert.True(t, r.dirty)
+	r.Flush(true) // 强制 → 刷新
+	assert.False(t, r.dirty)
+
+	r.Stop()
+	r.Step("步骤3") // 已停止 → 不记录
+	r.Flush(true)
+	r.mu.Lock()
+	assert.Len(t, r.steps, 2)
+	assert.False(t, r.dirty)
+	r.mu.Unlock()
+}
+
+// TestProgressReporter_StepWindow 只保留最近 maxProgressSteps 条步骤
+func TestProgressReporter_StepWindow(t *testing.T) {
+	r := newProgressReporter(&FeishuBot{}, "om_card")
+	for i := 0; i < maxProgressSteps+3; i++ {
+		r.mu.Lock()
+		r.lastPatch = time.Now().Add(-time.Hour) // 拨回绕过限频
+		r.mu.Unlock()
+		r.Step(fmt.Sprintf("步骤%d", i))
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	assert.Len(t, r.steps, maxProgressSteps)
+	assert.Equal(t, fmt.Sprintf("步骤%d", maxProgressSteps+2), r.steps[len(r.steps)-1])
+}
+
+// TestTruncateStepForProgress 超长步骤截断（工具参数 JSON）、多行计划限 6 行
+func TestTruncateStepForProgress(t *testing.T) {
+	// 超长单行
+	long := strings.Repeat("参", maxProgressStepRunes+10)
+	got := truncateStepForProgress(long)
+	assert.LessOrEqual(t, len([]rune(got)), maxProgressStepRunes+1) // +1 为省略号
+	assert.True(t, strings.HasSuffix(got, "…"))
+
+	// 多行计划：超过 6 行截断
+	lines := []string{"📝 计划："}
+	for i := 0; i < 10; i++ {
+		lines = append(lines, fmt.Sprintf("%d. 任务", i))
+	}
+	got = truncateStepForProgress(strings.Join(lines, "\n"))
+	assert.LessOrEqual(t, len(strings.Split(got, "\n")), 7) // 6 行 + 省略号
+	assert.True(t, strings.HasSuffix(got, "…"))
+}
+
+// TestFormatProgressElapsed 耗时格式化
+func TestFormatProgressElapsed(t *testing.T) {
+	assert.Equal(t, "42秒", formatProgressElapsed(42*time.Second))
+	assert.Equal(t, "3分12秒", formatProgressElapsed(3*time.Minute+12*time.Second))
+	assert.Equal(t, "1时2分", formatProgressElapsed(time.Hour+2*time.Minute))
+	assert.Equal(t, "0秒", formatProgressElapsed(-time.Second))
+}
+
 // TestCollectAgentReply_OnlyReasoning 验证：当模型（如 GLM-5.2）将全部回复放在
 // reasoning_content 中而 content 为空时，不应将思考过程作为回复返回给用户。
 // 飞书机器人只回复最终分析结果（Content），不回复思考过程（ReasoningContent）。
