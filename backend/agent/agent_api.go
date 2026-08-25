@@ -296,7 +296,13 @@ func (receiver StockAiAgent) ChatWithContext(ctx context.Context, question strin
 		if stockAiAgent.instance != nil {
 			mode = stockAiAgent.instance.Mode
 		}
-		ctx, runner := NewAgentRunner(ctx, question, stockAiAgent.sessionID, defaultAgentRunBudget(), deepAgentRootDir())
+		budget := estimateAgentRunBudget(question, mode)
+		durationLabel := "不限时"
+		if budget.MaxDuration > 0 {
+			durationLabel = budget.MaxDuration.String()
+		}
+		logger.SugaredLogger.Infof("运行预算: mode=%s duration=%s maxToolCalls=%d", mode, durationLabel, budget.MaxToolCalls)
+		ctx, runner := NewAgentRunner(ctx, question, stockAiAgent.sessionID, budget, deepAgentRootDir())
 		runner.Start(mode)
 		run := runner.Run()
 		run.SetAIConfigID(aiConfigId)
@@ -555,6 +561,15 @@ func runPlanExecuteWithFallback(ctx context.Context, stockAiAgent *StockAiAgent,
 	planExecuteSuccess := tryPlanExecute(ctx, stockAiAgent, messages, ch, memoryService, historyMessages, sysPrompt, question)
 
 	if !planExecuteSuccess {
+		// context 已超时/取消时跳过降级：React 会复用同一失效 context 立即失败，
+		// 提前终止并说明原因，避免"⚠️ 切换到工具分析模式"预告了不会发生的续跑。
+		if ctx.Err() != nil {
+			safeSend(ch, &schema.Message{
+				Role:    schema.Assistant,
+				Content: fmt.Sprintf("❌ 规划模式失败且本轮运行已结束，跳过降级重试：%v", ctx.Err()),
+			})
+			return
+		}
 		logger.SugaredLogger.Warnf("PlanExecute 模式失败，降级到 React 模式")
 
 		safeSend(ch, &schema.Message{
@@ -631,6 +646,10 @@ func runDeepAgents(ctx context.Context, stockAiAgent *StockAiAgent, messages []*
 				errMsg += "\n\n💡 已达到最大迭代次数限制，任务未完成。请尝试简化问题或切换到快速模式。"
 			} else if strings.Contains(event.Err.Error(), "reasoning_content") || strings.Contains(event.Err.Error(), "thinking is enabled") {
 				errMsg += "\n\n💡 可能是当前模型开启了 thinking/reasoning 模式，但该模式与工具调用不兼容。请在 AI 配置中关闭 thinking 模式，或切换到支持工具调用的模型。"
+			} else if isContextCanceledError(event.Err) {
+				// 运行预算已不限时，此处的 deadline 只能来自模型 HTTP 客户端
+				// 超时（AI 配置 timeOut，默认 300 秒/次请求）或用户主动中止。
+				errMsg += "\n\n💡 模型请求超时或已被中止。DeepAgents 单次运行不限时，可在 AI 配置中调大超时时间（timeOut，默认 300 秒）后重试。"
 			}
 			safeSend(ch, &schema.Message{
 				Role:    schema.Assistant,
@@ -739,6 +758,26 @@ func tryPlanExecute(ctx context.Context, stockAiAgent *StockAiAgent, messages []
 
 		if event.Err != nil {
 			logger.SugaredLogger.Errorf("agent event error: %v", event.Err)
+
+			// context 已超时或被取消：降级到 React 只会复用同一失效 context 立即失败
+			// （表现为误导性的"❌ React Agent 调用失败：context deadline exceeded"），
+			// 因此直接终止本轮并保留已生成的部分内容（break 落到末尾记忆保存逻辑）。
+			if ctx.Err() != nil || isContextCanceledError(event.Err) {
+				if ctx.Err() == context.Canceled {
+					safeSend(ch, &schema.Message{
+						Role:    schema.Assistant,
+						Content: "⏹️ 已停止本轮分析。",
+					})
+				} else {
+					errMsg := fmt.Sprintf("❌ Agent 调用失败：%v", event.Err)
+					errMsg += "\n\n💡 模型请求超时或本轮已被终止。已保留部分分析结果，可在 AI 配置中调大超时时间（timeOut，默认 300 秒）后重试，或简化问题。"
+					safeSend(ch, &schema.Message{
+						Role:    schema.Assistant,
+						Content: errMsg,
+					})
+				}
+				break
+			}
 
 			if strings.Contains(event.Err.Error(), "unmarshal plan error") ||
 				strings.Contains(event.Err.Error(), "invalid char") ||
@@ -897,6 +936,21 @@ func buildFallbackMessages(messages []*schema.Message, partial *strings.Builder)
 	return validateAndFixMessages(fallbackMessages)
 }
 
+// isContextCanceledError 判断错误是否源于 context 超时或取消。
+// eino 的 GraphRunError/NodeRunError 不保证实现 Unwrap，errors.Is 之外需辅以字符串匹配。
+func isContextCanceledError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return true
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "context deadline exceeded") ||
+		strings.Contains(msg, "context canceled") ||
+		strings.Contains(msg, "context has been canceled")
+}
+
 func fallbackWithReactAgent(ctx context.Context, stockAiAgent *StockAiAgent, ch chan *schema.Message, messages []*schema.Message, memoryService *ChatMemoryService, historyMessages []*schema.Message, sysPrompt string, question string, partial *strings.Builder) {
 	defer func() {
 		if r := recover(); r != nil {
@@ -907,6 +961,16 @@ func fallbackWithReactAgent(ctx context.Context, stockAiAgent *StockAiAgent, ch 
 			})
 		}
 	}()
+
+	// context 已超时/取消时跳过降级：React 会复用同一失效 context，
+	// Stream 立即以 GraphRunError 失败，向用户展示误导性的"React Agent 调用失败"。
+	if ctx.Err() != nil {
+		safeSend(ch, &schema.Message{
+			Role:    schema.Assistant,
+			Content: fmt.Sprintf("❌ 本轮运行已结束，跳过降级重试：%v", ctx.Err()),
+		})
+		return
+	}
 
 	reactAgent := createFallbackReactAgent(ctx, stockAiAgent, stockAiAgent.thinkingMode)
 	if reactAgent == nil {
@@ -991,6 +1055,10 @@ func runReactWithAgent(ctx context.Context, reactAgent *react.Agent, messages []
 			if err != nil {
 				// 直接展示原始错误，避免固定文案掩盖真实原因（如 max_tokens 超限、限流、鉴权等）
 				errMsg := fmt.Sprintf("❌ React Agent 调用失败：%v", err)
+				// context 已超时/取消：说明是请求超时或运行被终止而非 React 本身故障，避免误导排查方向
+				if ctx.Err() != nil || isContextCanceledError(err) {
+					errMsg += "\n\n💡 模型请求超时或本轮已被终止，降级重试未能完成。可在 AI 配置中调大超时时间（timeOut，默认 300 秒）后重试，或简化问题。"
+				}
 				safeSend(ch, &schema.Message{
 					Role:    schema.Assistant,
 					Content: errMsg,
