@@ -1,8 +1,7 @@
 <script setup>
 import {computed, onBeforeMount, onMounted, ref, reactive} from 'vue'
 import {
-  GetConfig, GetSponsorInfo, GetMachineId, CheckDeviceBinding, QuitApp,
-  GetEffectiveSponsorVip, PromptPlazaRequest, ListFilesystemSkills,
+  GetConfig, CheckDeviceBinding, QuitApp, PromptPlazaRequest, ListFilesystemSkills,
   PackSkillToBase64, ImportSkillFromBase64
 } from "../../wailsjs/go/main/App";
 import {useMessage, useDialog} from "naive-ui";
@@ -24,7 +23,6 @@ const currentUser = ref(null)
 const categories = ref([])
 const activeCategory = ref(null)
 const activeSort = ref('latest')
-const vipOnlyFilter = ref(false)
 const keyword = ref('')
 const loading = ref(false)
 const skills = ref([])
@@ -57,7 +55,6 @@ const shareModal = reactive({
   description: '',
   category: '',
   tags: '',
-  vipOnly: false,
   content: '',
   fileCount: 0,
   packageSize: 0,
@@ -145,7 +142,6 @@ async function loadSkills() {
     if (activeCategory.value) params.category = activeCategory.value
     if (keyword.value) params.keyword = keyword.value
     params.sort = activeSort.value
-    if (vipOnlyFilter.value) params.vipOnly = 'true'
     const data = await apiGet('/skills', params)
     skills.value = data.list || []
     pagination.itemCount = data.total || 0
@@ -161,7 +157,6 @@ async function fetchCurrentUser() {
   try {
     const data = await apiGet('/user/me')
     currentUser.value = data
-    syncVipInfo()
     checkDeviceLimit()
   } catch (e) {
     token.value = ''
@@ -202,44 +197,6 @@ async function checkDeviceLimit() {
   }
 }
 
-async function syncVipInfo() {
-  if (!token.value) return
-  try {
-    const sponsorInfo = await GetSponsorInfo()
-    const vipLevel = sponsorInfo?.vipLevel ? Number(sponsorInfo.vipLevel) : 0
-    const vipExpireAt = sponsorInfo?.vipEndTime || ''
-    let uuid = ''
-    try {
-      uuid = await GetMachineId()
-    } catch (e) {
-      console.warn('获取机器ID失败', e)
-    }
-    const body = {vipLevel, uuid}
-    if (vipLevel > 0 && vipExpireAt) {
-      const d = new Date(vipExpireAt.replace(' ', 'T'))
-      body.vipExpireAt = d.toISOString()
-    } else {
-      body.vipExpireAt = ''
-    }
-    try {
-      const config = await GetConfig()
-      if (config?.sponsorCode) {
-        body.sponsorCode = config.sponsorCode
-      }
-    } catch (e) {
-      console.warn('获取赞助码失败', e)
-    }
-    // 服务端权威校验赞助码后返回实际 VIP 状态（客户端提交的 vipLevel 仅作参考，服务端不信任）
-    const data = await apiPost('/user/vip', body)
-    if (currentUser.value) {
-      currentUser.value.vipLevel = data.vipLevel
-      currentUser.value.vipExpireAt = data.vipExpireAt
-    }
-  } catch (e) {
-    console.warn('同步VIP信息失败', e)
-  }
-}
-
 async function handleLogin() {
   try {
     const data = await apiPost('/auth/login', {
@@ -253,7 +210,6 @@ async function handleLogin() {
     currentUser.value = data.user
     loginModal.show = false
     message.success('登录成功')
-    syncVipInfo()
     checkDeviceLimit()
     loadSkills()
   } catch (e) {
@@ -278,7 +234,6 @@ async function handleRegister() {
     loginModal.password = ''
     loginModal.nickname = ''
     message.success('注册成功')
-    syncVipInfo()
     checkDeviceLimit()
     loadSkills()
   } catch (e) {
@@ -371,10 +326,6 @@ async function handleFavorite(skill) {
 
 // 从广场下载技能包并导入本地 skills 目录
 async function handleImport(skill) {
-  if (skill.needVip) {
-    message.warning('该技能为VIP专属，请先开通VIP')
-    return
-  }
   detailModal.importing = true
   try {
     const data = await apiGet(`/skills/${skill.id}/download`)
@@ -438,7 +389,6 @@ async function showShareModal() {
     shareModal.localSkills = []
     message.error('加载本地技能列表失败: ' + e)
   }
-  shareModal.vipOnly = !!(currentUser.value && currentUser.value.vipLevel > 0 && currentUser.value.vipExpireAt && new Date(currentUser.value.vipExpireAt) > new Date())
   shareModal.show = true
 }
 
@@ -488,7 +438,7 @@ async function handleShare() {
       content: shareModal.content,
       fileCount: shareModal.fileCount,
       packageSize: shareModal.packageSize,
-      vipOnly: shareModal.vipOnly
+      vipOnly: false
     })
     shareModal.show = false
     message.success(data.message || '分享成功')
@@ -593,9 +543,8 @@ function timeAgo(timeStr) {
         <n-space>
           <n-button type="success" @click="showShareModal">📤 分享我的技能</n-button>
           <template v-if="isLoggedIn">
-            <n-tag :type="currentUser?.vipLevel >= 1 ? 'warning' : 'success'" size="medium" round>
+            <n-tag type="success" size="medium" round>
               {{ currentUser?.nickname || currentUser?.username || '已登录' }}
-              <template v-if="currentUser?.vipLevel >= 1"> · VIP{{ currentUser.vipLevel }}</template>
             </n-tag>
             <n-button size="small" quaternary @click="handleLogout">退出</n-button>
           </template>
@@ -620,14 +569,6 @@ function timeAgo(timeStr) {
           <n-radio-button value="favorites">⭐ 收藏</n-radio-button>
           <n-radio-button value="downloads">⬇️ 导入</n-radio-button>
         </n-radio-group>
-        <n-divider vertical />
-        <n-button
-          :type="vipOnlyFilter ? 'warning' : 'default'"
-          size="small"
-          @click="vipOnlyFilter = !vipOnlyFilter; pagination.page = 1; loadSkills()"
-        >
-          👑 VIP专属
-        </n-button>
       </n-space>
 
       <n-spin :show="loading">
@@ -642,7 +583,6 @@ function timeAgo(timeStr) {
               <template #header>
                 <n-space align="center" :size="6">
                   <n-text strong style="font-size: 15px">{{ item.name }}</n-text>
-                  <n-tag v-if="item.vipOnly" type="warning" size="tiny" round>👑 VIP</n-tag>
                 </n-space>
               </template>
               <template #header-extra>
@@ -655,7 +595,6 @@ function timeAgo(timeStr) {
                 <n-space justify="space-between" align="center">
                   <n-text depth="3" style="font-size: 12px">
                     {{ item.user?.nickname || item.user?.username || '匿名' }}
-                    <n-tag v-if="item.user?.vipLevel >= 1" type="warning" size="tiny" round style="margin-left: 2px">VIP{{ item.user.vipLevel }}</n-tag>
                     · {{ timeAgo(item.createdAt) }}
                   </n-text>
                   <n-space :size="12" style="font-size: 12px">
@@ -700,7 +639,6 @@ function timeAgo(timeStr) {
       <template v-if="detailModal.data">
         <n-space align="left" justify="space-between" style="margin-bottom: 12px">
           <n-space align="left" :size="8">
-            <n-tag v-if="detailModal.data.vipOnly" type="warning" size="small" round>👑 VIP专属</n-tag>
             <n-tag v-if="detailModal.data.category" type="info" size="small">{{ detailModal.data.category }}</n-tag>
             <n-tag size="small">📁 {{ detailModal.data.dirName }}</n-tag>
             <n-tag size="small" :bordered="false">{{ detailModal.data.fileCount || 0 }} 文件 · {{ formatSize(detailModal.data.packageSize) }}</n-tag>
@@ -757,15 +695,6 @@ function timeAgo(timeStr) {
               :theme="editorTheme"
               style="text-align: left"
             />
-            <div
-              v-if="detailModal.data.needVip"
-              style="position: absolute; bottom: 0; left: 0; right: 0; height: 120px; background: linear-gradient(to bottom, transparent, var(--n-color)); display: flex; align-items: flex-end; justify-content: center; padding-bottom: 16px"
-            >
-              <n-space vertical align="center" :size="4">
-                <n-tag type="warning" size="medium" round>👑 VIP专属技能</n-tag>
-                <n-text depth="3" style="font-size: 12px">开通VIP后可导入完整技能包</n-text>
-              </n-space>
-            </div>
           </div>
         </n-space>
       </template>
@@ -823,11 +752,6 @@ function timeAgo(timeStr) {
           <n-text style="width: 36px">标签</n-text>
           <n-input v-model:value="shareModal.tags" placeholder="逗号分隔" style="width: 174px" />
         </n-space>
-        <n-space align="center">
-          <n-text>VIP专属</n-text>
-          <n-switch v-model:value="shareModal.vipOnly" />
-          <n-text depth="3" style="font-size: 12px">仅VIP用户可导入该技能包</n-text>
-        </n-space>
         <n-space justify="end">
           <n-button @click="shareModal.show = false">取消</n-button>
           <n-button type="primary" :loading="shareModal.submitting" :disabled="!shareModal.content" @click="handleShare">分享</n-button>
@@ -863,7 +787,6 @@ function timeAgo(timeStr) {
                   style="min-width: 28px; text-align: center"
                 >{{ item.rank }}</n-tag>
                 <n-text strong>{{ item.name }}</n-text>
-                <n-tag v-if="item.vipOnly" type="warning" size="tiny" round>VIP</n-tag>
                 <n-text depth="3" style="font-size: 12px">{{ item.user?.nickname || item.user?.username || '匿名' }}</n-text>
                 <n-text depth="3" style="font-size: 12px">
                   ❤️ {{ item.likesCount || 0 }} · ⭐ {{ item.favoritesCount || 0 }} · ⬇️ {{ item.downloadsCount || 0 }}
@@ -884,7 +807,6 @@ function timeAgo(timeStr) {
             <n-space align="center" justify="space-between" style="width: 100%">
               <n-space align="center" :size="12" style="cursor: pointer" @click="mySharesModal.show = false; showDetail(item.id)">
                 <n-text strong>{{ item.name }}</n-text>
-                <n-tag v-if="item.vipOnly" type="warning" size="tiny" round>VIP</n-tag>
                 <n-tag v-if="item.category" size="tiny">{{ item.category }}</n-tag>
                 <n-text depth="3" style="font-size: 12px">{{ timeAgo(item.createdAt) }}</n-text>
                 <n-text depth="3" style="font-size: 12px">

@@ -5,6 +5,7 @@ package main
 import (
 	"archive/zip"
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"go-stock/backend/data"
@@ -125,6 +126,7 @@ func TestLoadWebBindingMethods(t *testing.T) {
 		"SubmitAgentFeedback", "RunRecommendBacktest",
 		"GetMottos", "CreateMotto", "UpdateMotto", "DeleteMotto", "PolishMotto",
 		"TestAIConfig",
+		"PackSkillToBase64", "ImportSkillFromBase64",
 	} {
 		if _, ok := methods[name]; !ok {
 			t.Fatalf("binding method %s not found", name)
@@ -362,6 +364,34 @@ func TestWebRPCRoutes(t *testing.T) {
 
 			server.Handler.ServeHTTP(recorder, req)
 			if recorder.Code != http.StatusOK {
+				t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+			}
+		})
+	}
+}
+
+func TestWebSkillPlazaRPCMethods(t *testing.T) {
+	t.Chdir(t.TempDir())
+	server, err := newWebHTTPServer("127.0.0.1:0", &App{}, newWebEventHub())
+	if err != nil {
+		t.Fatalf("newWebHTTPServer() error = %v", err)
+	}
+
+	tests := []struct {
+		method string
+		body   string
+		want   string
+	}{
+		{method: "PackSkillToBase64", body: `{"args":["missing"]}`, want: "技能目录不存在"},
+		{method: "ImportSkillFromBase64", body: `{"args":["not-base64"]}`, want: "技能包解码失败"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.method, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/api/rpc/"+tt.method, strings.NewReader(tt.body))
+			req.Header.Set("Content-Type", "application/json")
+			recorder := httptest.NewRecorder()
+			server.Handler.ServeHTTP(recorder, req)
+			if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), tt.want) {
 				t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
 			}
 		})
@@ -829,6 +859,49 @@ func TestImportSkillPackageKeepsExistingSkillOnExtractionFailure(t *testing.T) {
 	}
 
 	result := (&App{}).importSkillPackage(packagePath, "demo.zip")
+	if strings.Contains(result, "导入成功") {
+		t.Fatalf("expected extraction failure, result = %s", result)
+	}
+	content, err := os.ReadFile(existingPath)
+	if err != nil {
+		t.Fatalf("existing skill was removed: %v", err)
+	}
+	if string(content) != "keep" {
+		t.Fatalf("existing skill content = %q", content)
+	}
+}
+
+func TestImportSkillFromBase64KeepsExistingSkillOnExtractionFailure(t *testing.T) {
+	t.Chdir(t.TempDir())
+	existingDir := filepath.Join("skills", "demo")
+	if err := os.MkdirAll(existingDir, 0o755); err != nil {
+		t.Fatalf("os.MkdirAll() error = %v", err)
+	}
+	existingPath := filepath.Join(existingDir, "existing.txt")
+	if err := os.WriteFile(existingPath, []byte("keep"), 0o644); err != nil {
+		t.Fatalf("os.WriteFile() error = %v", err)
+	}
+
+	var packageBody bytes.Buffer
+	zipWriter := zip.NewWriter(&packageBody)
+	for name, content := range map[string]string{
+		"demo/SKILL.md":      "---\nname: demo\ndescription: demo skill\n---\n",
+		"demo/conflict":      "file",
+		"demo/conflict/file": "cannot create below a file",
+	} {
+		entry, err := zipWriter.Create(name)
+		if err != nil {
+			t.Fatalf("zipWriter.Create() error = %v", err)
+		}
+		if _, err := entry.Write([]byte(content)); err != nil {
+			t.Fatalf("entry.Write() error = %v", err)
+		}
+	}
+	if err := zipWriter.Close(); err != nil {
+		t.Fatalf("zipWriter.Close() error = %v", err)
+	}
+
+	result := (&App{}).ImportSkillFromBase64(base64.StdEncoding.EncodeToString(packageBody.Bytes()))
 	if strings.Contains(result, "导入成功") {
 		t.Fatalf("expected extraction failure, result = %s", result)
 	}

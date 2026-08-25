@@ -4124,12 +4124,17 @@ func (a *App) importSkillPackage(zipPath, packageName string) string {
 			return "创建文件失败: " + err.Error()
 		}
 
-		_, err = io.Copy(outFile, rc)
+		// ZIP 头中的大小可能被伪造，实际写入仍需受单文件上限约束。
+		written, err := io.Copy(outFile, io.LimitReader(rc, maxFileSize+1))
 		rc.Close()
 		outFile.Close()
 		if err != nil {
 			os.RemoveAll(targetDir)
 			return "写入文件失败: " + err.Error()
+		}
+		if written > maxFileSize {
+			os.RemoveAll(targetDir)
+			return "文件过大（超过10MB）: " + f.Name
 		}
 	}
 
@@ -4345,6 +4350,8 @@ func (a *App) DeleteSkillFile(dirName, filePath string) string {
 	return "删除成功"
 }
 
+const maxSkillSharePackageSize = 2 * 1024 * 1024
+
 // PackSkillToBase64
 //
 //	@Description: 将本地 skills 目录下的指定技能打包为 zip 并 base64 编码，用于分享到技能广场。
@@ -4389,8 +4396,7 @@ func (a *App) PackSkillToBase64(dirName string) map[string]any {
 		result["msg"] = "遍历技能目录失败: " + err.Error()
 		return result
 	}
-	const maxShareTotal = 2 * 1024 * 1024 // 与服务端技能包 2MB 限制保持一致
-	if totalSize > maxShareTotal {
+	if totalSize > maxSkillSharePackageSize {
 		result["msg"] = fmt.Sprintf("技能总大小 %.1fMB 超过分享上限 2MB", float64(totalSize)/1024/1024)
 		return result
 	}
@@ -4456,110 +4462,25 @@ func (a *App) ImportSkillFromBase64(contentBase64 string) string {
 	if len(raw) == 0 {
 		return "技能包内容为空"
 	}
+	if len(raw) > maxSkillSharePackageSize {
+		return "技能包大小超过分享上限 2MB"
+	}
 
-	reader, err := zip.NewReader(bytes.NewReader(raw), int64(len(raw)))
+	// 复用文件导入的路径校验、临时目录与原子替换，避免两条导入路径安全语义漂移。
+	packageFile, err := os.CreateTemp("", "go-stock-skill-plaza-*.zip")
 	if err != nil {
-		return "技能包不是有效的 ZIP 文件: " + err.Error()
+		return "创建技能包临时文件失败: " + err.Error()
 	}
-
-	// 验证包含 SKILL.md，并确定技能目录名（与 ImportSkillPackage 规则一致）
-	var skillDirName string
-	hasSkillMd := false
-	for _, f := range reader.File {
-		if strings.Contains(f.Name, "..") {
-			return "压缩包包含非法路径: " + f.Name
-		}
-		base := filepath.Base(f.Name)
-		if base == "SKILL.md" && !f.FileInfo().IsDir() {
-			hasSkillMd = true
-			dir := filepath.Dir(f.Name)
-			if dir == "." || dir == "" {
-				skillDirName = "imported-skill"
-			} else {
-				skillDirName = strings.SplitN(filepath.ToSlash(dir), "/", 2)[0]
-			}
-			break
-		}
+	packagePath := packageFile.Name()
+	defer os.Remove(packagePath)
+	if _, err := packageFile.Write(raw); err != nil {
+		packageFile.Close()
+		return "写入技能包临时文件失败: " + err.Error()
 	}
-	if !hasSkillMd {
-		return "技能包中未找到 SKILL.md 文件，不是有效的技能包"
+	if err := packageFile.Close(); err != nil {
+		return "关闭技能包临时文件失败: " + err.Error()
 	}
-
-	skillDirName = sanitizeSkillDirName(skillDirName)
-	if skillDirName == "" {
-		skillDirName = "imported-skill"
-	}
-
-	targetDir := filepath.Join(skillsDir(), skillDirName)
-	if _, err := os.Stat(targetDir); err == nil {
-		os.RemoveAll(targetDir)
-	}
-	if err := os.MkdirAll(targetDir, 0o755); err != nil {
-		return "创建技能目录失败: " + err.Error()
-	}
-
-	const maxFileSize = 10 * 1024 * 1024
-	var totalSize int64
-	const maxTotalSize = 100 * 1024 * 1024
-	for _, f := range reader.File {
-		// zip 顶层目录名与技能目录名一致时剥离前缀，避免解压后双层嵌套
-		name := filepath.ToSlash(f.Name)
-		prefix := skillDirName + "/"
-		if strings.HasPrefix(name, prefix) {
-			name = strings.TrimPrefix(name, prefix)
-		}
-		if name == "" {
-			continue
-		}
-
-		if f.FileInfo().IsDir() {
-			fullPath := filepath.Join(targetDir, name)
-			os.MkdirAll(fullPath, 0o755)
-			continue
-		}
-
-		if f.UncompressedSize64 > maxFileSize {
-			os.RemoveAll(targetDir)
-			return "文件过大（超过10MB）: " + f.Name
-		}
-		totalSize += int64(f.UncompressedSize64)
-		if totalSize > maxTotalSize {
-			os.RemoveAll(targetDir)
-			return "压缩包总大小超过 100MB 限制"
-		}
-
-		rc, err := f.Open()
-		if err != nil {
-			os.RemoveAll(targetDir)
-			return "解压失败: " + err.Error()
-		}
-
-		fullPath := filepath.Join(targetDir, name)
-		os.MkdirAll(filepath.Dir(fullPath), 0o755)
-
-		outFile, err := os.Create(fullPath)
-		if err != nil {
-			rc.Close()
-			os.RemoveAll(targetDir)
-			return "创建文件失败: " + err.Error()
-		}
-
-		// 限制实际解压字节数（zip 头声明大小可被伪造，不能仅信任 UncompressedSize64）
-		written, err := io.Copy(outFile, io.LimitReader(rc, maxFileSize+1))
-		rc.Close()
-		outFile.Close()
-		if err != nil {
-			os.RemoveAll(targetDir)
-			return "写入文件失败: " + err.Error()
-		}
-		if written > maxFileSize {
-			os.RemoveAll(targetDir)
-			return "文件过大（超过10MB）: " + f.Name
-		}
-	}
-
-	logger.SugaredLogger.Infof("技能广场技能导入成功: %s -> %s", skillDirName, targetDir)
-	return "技能 '" + skillDirName + "' 导入成功"
+	return a.importSkillPackage(packagePath, "imported-skill.zip")
 }
 
 // parseSkillFrontmatter 从 SKILL.md 内容中解析 frontmatter 元数据
