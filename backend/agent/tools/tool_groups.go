@@ -91,6 +91,7 @@ var toolGroupMap = map[string]ToolGroup{
 	"GetStockHolderTrend":         GroupStockAnalysis,
 	"GetStockBillboard":           GroupStockAnalysis,
 	"GetStockOperationDeptTrade":  GroupStockAnalysis,
+	"GetLhbSeatDetail":            GroupStockAnalysis,
 	"GetStockOrgBasicInfo":        GroupStockAnalysis,
 	"ComparableCompanyAnalysis":   GroupStockAnalysis,
 	"HotspotDiscovery":            GroupMarket,
@@ -203,6 +204,8 @@ var toolGroupMap = map[string]ToolGroup{
 	"MergeStockConcepts":      GroupOperations,
 	"ReorganizeStockGroups":   GroupOperations,
 
+	"MarkdownToImage": GroupOperations,
+
 	"ListPromptTemplates":  GroupBase,
 	"GetPromptTemplate":    GroupBase,
 	"SavePromptTemplate":   GroupBase,
@@ -290,7 +293,7 @@ var groupKeywordsList = []groupKeywords{
 		"公告搜索", "分红公告", "回购公告", "重组公告", "定期报告",
 		"资讯搜索", "金融资讯", "舆情监控", "热点捕捉", "研报速览", "公告精读",
 		"日历", "财报日", "股东大会", "IPO",
-		"龙虎榜", "营业部",
+		"龙虎榜", "营业部", "游资", "席位",
 		"涨停", "连板", "梯队", "涨停复盘", "涨停板块", "炸板", "封板",
 		"热门板块", "板块热度", "板块轮动", "主线题材", "接力板块",
 		"个股热度", "热门个股", "人气股", "关注度",
@@ -315,6 +318,7 @@ var groupKeywordsList = []groupKeywords{
 		"关注", "自选", "加自选", "加入分组", "设置概念", "概念标签", "归类", "持仓", "持仓量",
 		"交易日志", "交易记录", "盈亏",
 		"操作计划", "每日计划", "操作方案", "明日操作", "明天操作", "盘中预警",
+		"生成图片", "转成图片", "转为图片", "导出图片", "保存为图片", "图片形式", "长图", "渲染图片", "markdown转图片",
 	}},
 }
 

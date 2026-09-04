@@ -233,7 +233,6 @@ func (a *App) QuitApp() {
 		runtime.Quit(a.ctx)
 	}
 }
-
 func (a *App) CheckUpdate(flag int) {
 	if a.webMode {
 		if flag == 1 {
@@ -341,7 +340,9 @@ func (a *App) CheckUpdate(flag int) {
 				assetName = "go-stock-windows-amd64.exe"
 			}
 		} else if IsMacOS() {
-			assetName = "go-stock-darwin-universal"
+			// macOS 下载 .app bundle 完整包（含 Info.plist/资源/签名），整体替换生效；
+			// 裸二进制替换会破坏代码签名且在 App Translocation/DMG 场景必然失败
+			assetName = "go-stock-darwin-universal.zip"
 		} else if IsLinux() {
 			assetName = "go-stock-linux-amd64"
 		}
@@ -474,6 +475,31 @@ func (a *App) CheckUpdate(flag int) {
 			"downloadId": downloadID,
 			"version":    releaseVersion.TagName,
 		})
+
+		// macOS：解压 .app bundle 并整体替换（见 update_helper_darwin.go），
+		// 成功后下次打开应用即为新版本，不强制重启
+		if IsMacOS() {
+			if err := ApplyMacUpdate(tmpPath); err != nil {
+				logger.SugaredLogger.Error("macOS 更新失败: ", err.Error())
+				go runtime.EventsEmit(a.ctx, "updateDownloadFailed", map[string]any{
+					"downloadId": downloadID,
+					"version":    releaseVersion.TagName,
+					"error":      err.Error(),
+					"manualLinks": map[string]any{
+						"mirror":   mirrorDownloadUrl,
+						"original": originalDownloadUrl,
+					},
+				})
+				return
+			}
+			go runtime.EventsEmit(a.ctx, "newsPush", map[string]any{
+				"time":    "新版本：" + releaseVersion.TagName,
+				"isRed":   true,
+				"source":  "go-stock",
+				"content": "版本更新完成，重启应用后生效（直接退出并重新打开 go-stock 即可）。",
+			})
+			return
+		}
 
 		body, err := os.ReadFile(tmpPath)
 		if err != nil {
@@ -3505,6 +3531,30 @@ func (a *App) ImportTradingRecordsFromExcel() (*data.TradingRecordImportResult, 
 	return data.NewStockDataApi().ImportTradingRecords(filePath)
 }
 
+// ExportTradingRecordTemplate 弹出保存对话框，将交易记录导入模板保存为 Tab 分隔文本。
+// 用户取消保存时返回空字符串，不报错。
+func (a *App) ExportTradingRecordTemplate() (string, error) {
+	dialogOptions := runtime.SaveDialogOptions{
+		Title:           "保存交易记录导入模板",
+		DefaultFilename: "交易记录导入模板.txt",
+		Filters: []runtime.FileFilter{
+			{DisplayName: "文本 (*.txt;*.csv)", Pattern: "*.txt;*.csv"},
+		},
+	}
+	filePath, err := runtime.SaveFileDialog(a.ctx, dialogOptions)
+	if err != nil {
+		return "", err
+	}
+	if filePath == "" {
+		// 用户取消保存
+		return "", nil
+	}
+	if err := os.WriteFile(filePath, []byte(data.NewStockDataApi().TradingRecordTemplateContent()), 0644); err != nil {
+		return "", err
+	}
+	return filePath, nil
+}
+
 // CheckFrequentTrading 检查是否频繁交易
 // 参数:
 //   - stockCode: 股票代码
@@ -3813,6 +3863,16 @@ func (a *App) RelearnUserProfile() (string, error) {
 // ClearUserProfile 清空用户画像
 func (a *App) ClearUserProfile() error {
 	return agent.NewUserProfileApi().ClearUserProfile()
+}
+
+// GetProfileLearnAiConfigId 获取画像学习模型设置（0=自动模式）
+func (a *App) GetProfileLearnAiConfigId() int {
+	return agent.NewUserProfileApi().GetProfileLearnAiConfigId()
+}
+
+// SetProfileLearnAiConfigId 设置画像学习模型（传 0 恢复自动模式）
+func (a *App) SetProfileLearnAiConfigId(aiConfigId int) error {
+	return agent.NewUserProfileApi().SetProfileLearnAiConfigId(aiConfigId)
 }
 
 // RunRecommendBacktest 执行 AI 推荐效果回测

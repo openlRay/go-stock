@@ -274,6 +274,10 @@ export function ExportConfig() {
   return window['go']['main']['App']['ExportConfig']();
 }
 
+export function ExportTradingRecordTemplate() {
+  return window['go']['main']['App']['ExportTradingRecordTemplate']();
+}
+
 export function FetchAiModelInfo(arg1, arg2, arg3, arg4) {
   return window['go']['main']['App']['FetchAiModelInfo'](arg1, arg2, arg3, arg4);
 }
@@ -550,6 +554,10 @@ export function GetHistoryTdxTransactionData(arg1, arg2) {
   return window['go']['main']['App']['GetHistoryTdxTransactionData'](arg1, arg2);
 }
 
+export function GetHotMoneySeats() {
+  return window['go']['main']['App']['GetHotMoneySeats']();
+}
+
 export function GetHotStrategy() {
   return window['go']['main']['App']['GetHotStrategy']();
 }
@@ -594,6 +602,14 @@ export function GetLatestTradingDay() {
   return window['go']['main']['App']['GetLatestTradingDay']();
 }
 
+export function GetLhbDailySummary(arg1) {
+  return window['go']['main']['App']['GetLhbDailySummary'](arg1);
+}
+
+export function GetLhbSeatDetail(arg1, arg2) {
+  return window['go']['main']['App']['GetLhbSeatDetail'](arg1, arg2);
+}
+
 export function GetLongTermMemoryAiConfigId() {
   return window['go']['main']['App']['GetLongTermMemoryAiConfigId']();
 }
@@ -632,6 +648,10 @@ export function GetMoneyRankSina(arg1) {
 
 export function GetMottos() {
   return window['go']['main']['App']['GetMottos']();
+}
+
+export function GetProfileLearnAiConfigId() {
+  return window['go']['main']['App']['GetProfileLearnAiConfigId']();
 }
 
 export function GetPromptTemplateList(arg1) {
@@ -986,6 +1006,10 @@ export function RefreshHistoryTdxTransactionData(arg1, arg2) {
   return window['go']['main']['App']['RefreshHistoryTdxTransactionData'](arg1, arg2);
 }
 
+export function RefreshHotMoneySeats(arg1) {
+  return window['go']['main']['App']['RefreshHotMoneySeats'](arg1);
+}
+
 export function RelearnUserProfile() {
   return window['go']['main']['App']['RelearnUserProfile']();
 }
@@ -1004,6 +1028,10 @@ export function RemoveStockConcept(arg1, arg2, arg3) {
 
 export function RemoveStockGroup(arg1, arg2, arg3) {
   return window['go']['main']['App']['RemoveStockGroup'](arg1, arg2, arg3);
+}
+
+export function ResetHotMoneySeats() {
+  return window['go']['main']['App']['ResetHotMoneySeats']();
 }
 
 export function RestartAsAdmin() {
@@ -1040,6 +1068,10 @@ export function SaveCustomStrategy(arg1) {
 
 export function SaveDailyOperationPlan(arg1) {
   return window['go']['main']['App']['SaveDailyOperationPlan'](arg1);
+}
+
+export function SaveHotMoneySeats(arg1) {
+  return window['go']['main']['App']['SaveHotMoneySeats'](arg1);
 }
 
 export function SaveImage(arg1, arg2) {
@@ -1112,6 +1144,10 @@ export function SetDefaultAIConfig(arg1) {
 
 export function SetLongTermMemoryAiConfigId(arg1) {
   return window['go']['main']['App']['SetLongTermMemoryAiConfigId'](arg1);
+}
+
+export function SetProfileLearnAiConfigId(arg1) {
+  return window['go']['main']['App']['SetProfileLearnAiConfigId'](arg1);
 }
 
 export function SetStockAICron(arg1, arg2) {

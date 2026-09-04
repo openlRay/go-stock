@@ -6,6 +6,8 @@ import {MdPreview, MdEditor} from 'md-editor-v3'
 import 'md-editor-v3/lib/preview.css'
 import 'md-editor-v3/lib/style.css'
 import {EventsEmit} from '../../wailsjs/runtime'
+import PlazaAuthModal from './plazaAuthModal.vue'
+import PlazaBindEmailModal from './plazaBindEmailModal.vue'
 
 const message = useMessage()
 const dialog = useDialog()
@@ -42,10 +44,11 @@ const detailModal = reactive({
 
 const loginModal = reactive({
   show: false,
-  tab: 'login',
-  username: localStorage.getItem('promptPlazaUsername') || '',
-  password: localStorage.getItem('promptPlazaPassword') || '',
-  nickname: ''
+  tab: 'login'
+})
+
+const bindEmailModal = reactive({
+  show: false
 })
 
 const createModal = reactive({
@@ -210,47 +213,20 @@ async function checkDeviceLimit() {
   }
 }
 
-async function handleLogin() {
-  try {
-    const data = await apiPost('/auth/login', {
-      username: loginModal.username,
-      password: loginModal.password
-    })
-    token.value = data.token
-    localStorage.setItem('promptPlazaToken', data.token)
-    localStorage.setItem('promptPlazaUsername', loginModal.username)
-    localStorage.setItem('promptPlazaPassword', loginModal.password)
-    currentUser.value = data.user
-    loginModal.show = false
-    message.success('登录成功')
-    checkDeviceLimit()
-    loadPrompts()
-  } catch (e) {
-    message.error('登录失败: ' + e.message)
-  }
+// 登录/注册成功（共享账号弹窗回调）：token 持久化已在弹窗内完成
+async function onPlazaLoggedIn(data) {
+  token.value = data.token
+  currentUser.value = data.user
+  // 登录/注册响应可能不含 email（旧版服务端），拉取完整资料驱动"绑定邮箱"入口显隐
+  // fetchCurrentUser 内部同时执行设备限制检查。
+  fetchCurrentUser()
+  loadPrompts()
 }
 
-async function handleRegister() {
-  try {
-    const data = await apiPost('/auth/register', {
-      username: loginModal.username,
-      password: loginModal.password,
-      nickname: loginModal.nickname
-    })
-    token.value = data.token
-    localStorage.setItem('promptPlazaToken', data.token)
-    localStorage.setItem('promptPlazaUsername', loginModal.username)
-    localStorage.setItem('promptPlazaPassword', loginModal.password)
-    currentUser.value = data.user
-    loginModal.show = false
-    loginModal.username = ''
-    loginModal.password = ''
-    loginModal.nickname = ''
-    message.success('注册成功')
-    checkDeviceLimit()
-    loadPrompts()
-  } catch (e) {
-    message.error('注册失败: ' + e.message)
+// 绑定邮箱成功（共享绑定弹窗回调）
+function onEmailBound({email}) {
+  if (currentUser.value) {
+    currentUser.value.email = email
   }
 }
 
@@ -612,6 +588,9 @@ function timeAgo(timeStr) {
             <n-tag type="success" size="medium" round>
               {{ currentUser?.nickname || currentUser?.username || '已登录' }}
             </n-tag>
+            <n-tag v-if="!currentUser?.email" size="small" type="warning" round style="cursor: pointer" title="绑定邮箱后可通过邮箱找回密码" @click="bindEmailModal.show = true">
+              📧 绑定邮箱
+            </n-tag>
             <n-button size="small" quaternary @click="handleLogout">退出</n-button>
           </template>
           <template v-else>
@@ -828,25 +807,22 @@ function timeAgo(timeStr) {
       </template>
     </n-modal>
 
-    <n-modal v-model:show="loginModal.show" preset="card" style="width: 400px" title="账号">
-      <n-tabs v-model:value="loginModal.tab" type="line">
-        <n-tab-pane name="login" tab="登录">
-          <n-space vertical :size="12">
-            <n-input v-model:value="loginModal.username" placeholder="用户名" />
-            <n-input v-model:value="loginModal.password" type="password" placeholder="密码" show-password-on="click" />
-            <n-button type="primary" block @click="handleLogin">登录</n-button>
-          </n-space>
-        </n-tab-pane>
-        <n-tab-pane name="register" tab="注册">
-          <n-space vertical :size="12">
-            <n-input v-model:value="loginModal.username" placeholder="用户名 (3-50字)" />
-            <n-input v-model:value="loginModal.password" type="password" placeholder="密码 (6字以上)" show-password-on="click" />
-            <n-input v-model:value="loginModal.nickname" placeholder="昵称 (可选)" />
-            <n-button type="primary" block @click="handleRegister">注册</n-button>
-          </n-space>
-        </n-tab-pane>
-      </n-tabs>
-    </n-modal>
+    <!-- 登录/注册/忘记密码（共享组件） -->
+    <PlazaAuthModal
+      v-model:show="loginModal.show"
+      v-model:tab="loginModal.tab"
+      :api-base="apiBase"
+      @logged-in="onPlazaLoggedIn"
+    />
+
+    <!-- 绑定邮箱（共享组件，未绑定邮箱的旧账号） -->
+    <PlazaBindEmailModal
+      v-model:show="bindEmailModal.show"
+      :api-base="apiBase"
+      :token="token"
+      :username="currentUser?.username || ''"
+      @bound="onEmailBound"
+    />
 
     <n-modal v-model:show="createModal.show" preset="card" style="width: 1100px; max-width: 95vw" title="发布提示词">
       <n-space vertical :size="12">

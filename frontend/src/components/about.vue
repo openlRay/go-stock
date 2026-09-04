@@ -198,31 +198,33 @@ EventsOn("updateNeedAdmin", (msg) => {
 </script>
 
 <template>
-      <n-space vertical size="large"  style="--wails-draggable:no-drag">
-        <!-- 软件描述 -->
-        <n-card size="large">
-          <n-divider title-placement="center">关于软件</n-divider>
-          <n-space vertical >
-            <n-image width="100" :src="icon" />
-            <h1>
-              <n-badge :value="versionInfo" :offset="[80,10]" type="success">
-                <n-gradient-text type="info" :size="50" >go-stock</n-gradient-text>
-              </n-badge>
-            </h1>
-            <n-flex justify="center">
-              <n-button v-if="!webMode" size="tiny" @click="CheckUpdate(1)" type="info" tertiary>检查更新</n-button>
-              <n-button size="tiny" @click="openManual" type="success" tertiary >查看用户手册</n-button>
-            </n-flex>
-            <div style="justify-self: center;text-align: left" >
-              <p>自选股行情实时监控，基于Wails和NaiveUI构建的AI赋能股票分析工具</p>
-              <p>目前已支持A股，港股，美股，未来计划加入基金，ETF等支持</p>
-              <p>支持DeepSeek，OpenAI， Ollama，LMStudio，AnythingLLM，<a href="https://cloud.siliconflow.cn/i/foufCerk" target="_blank">硅基流动</a>，<a href="https://www.volcengine.com/experience/ark?utm_term=202502dsinvite&ac=DSASUQY5&rc=IJSE43PZ" target="_blank">火山方舟</a>，阿里云百炼等平台或模型</p>
-              <p>
-                <i style="color: crimson">本软件仅供学习研究目的，AI分析结果仅供参考，本软件不提供任何投资建议或决策，风险自担！</i>
-              </p>
-              <p v-if="updateLog">更新说明：{{updateLog}}</p>
+      <div class="about-page" style="--wails-draggable:no-drag">
+        <n-card size="large" :bordered="false" class="hero-card">
+          <div class="hero">
+            <div class="hero-icon">
+              <n-image width="72" :src="icon" :preview-disabled="true" />
             </div>
-          </n-space>
+            <div class="hero-title">
+              <n-gradient-text type="info" :size="34" class="app-name">go-stock</n-gradient-text>
+              <n-tag v-if="versionInfo" :bordered="false" type="success" size="small" round>
+                v{{versionInfo}}
+              </n-tag>
+            </div>
+            <n-flex justify="center" :size="12" class="hero-actions">
+              <n-button v-if="!webMode" size="small" @click="CheckUpdate(1)" type="info" tertiary round>
+                <template #icon>🔄</template>
+                检查更新
+              </n-button>
+              <n-button size="small" @click="openManual" type="success" tertiary round>
+                <template #icon>📖</template>
+                查看用户手册
+              </n-button>
+              <n-button size="small" tag="a" href="https://github.com/ArvinLovegood/go-stock" target="_blank" type="default" tertiary round>
+                <template #icon>⭐</template>
+                GitHub
+              </n-button>
+            </n-flex>
+          </div>
         </n-card>
 
         <n-modal
@@ -254,11 +256,57 @@ EventsOn("updateNeedAdmin", (msg) => {
             </div>
           </div>
         </n-modal>
-      </n-space>
+      </div>
 </template>
 
 <style scoped>
-/* 可以在这里添加一些样式 */
+/* 页面整体 */
+.about-page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 1080px;
+  margin: 0 auto;
+}
+
+/* 顶部信息区 */
+.hero-card {
+  border-radius: 12px;
+}
+
+.hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0 4px;
+}
+
+.hero-icon {
+  width: 76px;
+  height: 76px;
+  border-radius: 20px;
+  overflow: hidden;
+  box-shadow: 0 4px 16px rgba(24, 160, 88, 0.25);
+}
+
+.hero-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.app-name {
+  font-weight: 600;
+  letter-spacing: 1px;
+}
+
+.hero-actions {
+  margin-top: 4px;
+}
+
 h1, h2 {
   margin: 0;
   padding: 6px 0;

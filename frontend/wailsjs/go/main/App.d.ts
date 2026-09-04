@@ -143,6 +143,8 @@ export function ExecuteCronTaskNow(arg1:number):Promise<string>;
 
 export function ExportConfig():Promise<string>;
 
+export function ExportTradingRecordTemplate():Promise<string>;
+
 export function FetchAiModelInfo(arg1:string,arg2:string,arg3:string,arg4:string):Promise<main.AiModelInfo>;
 
 export function FetchAiModels(arg1:string,arg2:string,arg3:string):Promise<Array<string>>;
@@ -281,6 +283,8 @@ export function GetHistoryTdxMinuteTimeData(arg1:string,arg2:string):Promise<dat
 
 export function GetHistoryTdxTransactionData(arg1:string,arg2:string):Promise<any>;
 
+export function GetHotMoneySeats():Promise<data.HotMoneySeatFile>;
+
 export function GetHotStrategy():Promise<Record<string, any>>;
 
 export function GetIndexQuotes():Promise<Array<data.IndexQuoteItem>>;
@@ -303,6 +307,10 @@ export function GetKoreaDayKLine(arg1:string,arg2:number):Promise<any>;
 
 export function GetLatestTradingDay():Promise<string>;
 
+export function GetLhbDailySummary(arg1:string):Promise<models.LhbDailySummary>;
+
+export function GetLhbSeatDetail(arg1:string,arg2:string):Promise<models.LhbSeatDetailData>;
+
 export function GetLongTermMemoryAiConfigId():Promise<number>;
 
 export function GetLongTermMemoryInfo():Promise<agent.LTMInfo>;
@@ -322,6 +330,8 @@ export function GetMarketStatisticByDate(arg1:string):Promise<Array<models.Marke
 export function GetMoneyRankSina(arg1:string):Promise<Array<Record<string, any>>>;
 
 export function GetMottos():Promise<Array<models.Motto>>;
+
+export function GetProfileLearnAiConfigId():Promise<number>;
 
 export function GetPromptTemplateList(arg1:models.PromptTemplateQuery):Promise<models.PromptTemplatePageData>;
 
@@ -499,6 +509,8 @@ export function RefreshAllTdxTransactionData(arg1:string):Promise<any>;
 
 export function RefreshHistoryTdxTransactionData(arg1:string,arg2:string):Promise<any>;
 
+export function RefreshHotMoneySeats(arg1:string):Promise<void>;
+
 export function RelearnUserProfile():Promise<string>;
 
 export function RemoveConcept(arg1:number):Promise<string>;
@@ -508,6 +520,8 @@ export function RemoveGroup(arg1:number):Promise<string>;
 export function RemoveStockConcept(arg1:string,arg2:string,arg3:number):Promise<string>;
 
 export function RemoveStockGroup(arg1:string,arg2:string,arg3:number):Promise<string>;
+
+export function ResetHotMoneySeats():Promise<void>;
 
 export function RestartAsAdmin():Promise<void>;
 
@@ -526,6 +540,8 @@ export function SaveAsMarkdown(arg1:string,arg2:string):Promise<string>;
 export function SaveCustomStrategy(arg1:models.CustomStrategy):Promise<string>;
 
 export function SaveDailyOperationPlan(arg1:models.DailyOperationPlan):Promise<string>;
+
+export function SaveHotMoneySeats(arg1:data.HotMoneySeatFile):Promise<void>;
 
 export function SaveImage(arg1:string,arg2:string):Promise<string>;
 
@@ -562,6 +578,8 @@ export function SetCostPriceAndVolume(arg1:string,arg2:number,arg3:number):Promi
 export function SetDefaultAIConfig(arg1:number):Promise<data.AIConfig>;
 
 export function SetLongTermMemoryAiConfigId(arg1:number):Promise<void>;
+
+export function SetProfileLearnAiConfigId(arg1:number):Promise<void>;
 
 export function SetStockAICron(arg1:string,arg2:string):Promise<void>;
 

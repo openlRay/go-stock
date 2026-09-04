@@ -462,36 +462,46 @@ func buildChatModelHTTPClient(timeout time.Duration, config data.AIConfig) *http
 	hasHeaders := len(headers) > 0
 	hasProxy := config.HttpProxyEnabled && config.HttpProxy != ""
 
-	if !hasHeaders && !hasProxy {
-		return nil
+	// 始终显式提供 transport，避免应用未启用代理时模型 SDK 回退到
+	// http.DefaultTransport，并被 HTTP_PROXY/HTTPS_PROXY 环境变量静默代理。
+	configuredTransport, err := newChatModelTransport(hasProxy, config.HttpProxy)
+	if err != nil {
+		logger.SugaredLogger.Warnf("解析 HTTP 代理失败，model=%q", config.ModelName)
 	}
 
-	var transport http.RoundTripper = http.DefaultTransport
-	if hasProxy {
-		proxyURL, err := url.Parse(config.HttpProxy)
-		if err != nil {
-			logger.SugaredLogger.Warnf("解析 HTTP 代理失败，model=%q", config.ModelName)
-		} else {
-			if base, ok := http.DefaultTransport.(*http.Transport); ok {
-				proxyTransport := base.Clone()
-				proxyTransport.Proxy = http.ProxyURL(proxyURL)
-				transport = proxyTransport
-			} else {
-				transport = &http.Transport{Proxy: http.ProxyURL(proxyURL)}
-			}
-		}
-	}
-
+	var roundTripper http.RoundTripper = configuredTransport
 	if hasHeaders {
-		transport = &headerInjectTransport{
-			base:      transport,
+		roundTripper = &headerInjectTransport{
+			base:      roundTripper,
 			headers:   headers,
 			sessionId: config.SessionId,
 		}
 	}
 
 	return &http.Client{
-		Transport: transport,
+		Transport: roundTripper,
 		Timeout:   timeout,
 	}
+}
+
+// newChatModelTransport 克隆标准 transport 并清除环境变量代理；
+// 只有当前 AI 配置显式启用代理时才设置应用代理。
+func newChatModelTransport(proxyEnabled bool, proxyURL string) (*http.Transport, error) {
+	base, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		base = &http.Transport{}
+	}
+	transport := base.Clone()
+	transport.Proxy = nil
+
+	if !proxyEnabled || strings.TrimSpace(proxyURL) == "" {
+		return transport, nil
+	}
+
+	parsed, err := url.Parse(proxyURL)
+	if err != nil {
+		return transport, err
+	}
+	transport.Proxy = http.ProxyURL(parsed)
+	return transport, nil
 }
