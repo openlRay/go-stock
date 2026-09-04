@@ -21,13 +21,13 @@ import (
 //
 // 输入支持两种形式（二选一，同时提供时以 markdown 内联文本为准）：
 //   - markdown：直接传入 markdown 文本
-//   - filePath：本地 markdown 文件路径（相对路径优先按工作目录解析，失败后回退程序目录）
+//   - filePath：Agent 文件沙箱内的 markdown 文件路径
 func newMarkdownToImageTool() tool.InvokableTool {
 	return NewDataToolWrapper(
 		"MarkdownToImage",
 		"将 Markdown 文本或本地 Markdown 文件渲染为 PNG 图片并保存到本地文件，返回图片的绝对路径。"+
 			"输入支持两种形式（二选一，同时提供时优先 markdown 内联文本）：markdown 直接传入文本；"+
-			"filePath 传入本地文件路径（如 D:\\docs\\report.md，相对路径优先按工作目录解析、失败后回退程序所在目录）。"+
+			"filePath 传入 Agent 文件沙箱内的本地文件路径。"+
 			"渲染基于无头 Chrome，自动跟随应用深色/浅色主题，支持标题、表格、代码块、列表、加粗、涨跌红绿着色等 Markdown 排版，"+
 			"适合把较长的分析报告、表格密集型内容生成图片以便查看、分享或存档。"+
 			"当用户要求把内容转成图片、生成图片、导出为图片、做成长图时使用。"+
@@ -40,7 +40,7 @@ func newMarkdownToImageTool() tool.InvokableTool {
 			},
 			"filePath": {
 				Type:     "string",
-				Desc:     "本地 Markdown 文件路径（.md/.markdown/.txt 等文本文件），如 D:\\docs\\report.md 或 report.md。与 markdown 二选一；相对路径优先按进程工作目录解析，失败后回退到程序所在目录。",
+				Desc:     "Agent 文件沙箱内的 Markdown 文件路径（.md/.markdown/.txt 等文本文件）。与 markdown 二选一；相对路径从沙箱根目录解析。",
 				Required: false,
 			},
 			"filename": {

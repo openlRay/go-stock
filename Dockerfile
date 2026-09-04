@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 ARG NODE_IMAGE=node:22-bookworm-slim
-ARG GO_IMAGE=golang:1.26-bookworm
+ARG GO_IMAGE=golang:1.27-bookworm
 ARG RUNTIME_IMAGE=debian:bookworm-slim
 
 FROM ${NODE_IMAGE} AS frontend-builder

@@ -12,7 +12,7 @@ func TestValidateGeneratedProfileKeepsOnlyKnownFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("validateGeneratedProfile failed: %v", err)
 	}
-	if got != "## 用户画像\n- 关注市场：A股\n- 关注标的：未明确\n- 持仓与成本：未明确\n- 风险偏好：稳健\n- 常用分析维度：未明确\n- 偏好格式：未明确\n- 需规避项：未明确" {
+	if got != "## 用户画像\n- 关注市场：A股\n- 关注板块：未明确\n- 关注标的：未明确\n- 持仓与成本：未明确\n- 风险偏好：稳健\n- 交易习惯：未明确\n- 常用分析维度：未明确\n- 提问模式：未明确\n- 偏好格式：未明确\n- 操作习惯：未明确\n- 需规避项：未明确" {
 		t.Fatalf("unexpected normalized profile:\n%s", got)
 	}
 }

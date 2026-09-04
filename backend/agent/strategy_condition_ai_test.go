@@ -13,9 +13,9 @@ import (
 
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
-	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
 
@@ -49,7 +49,7 @@ func (f *fakeStrategyConditionModel) WithTools([]*schema.ToolInfo) (model.ToolCa
 func withStrategyConditionTestDB(t *testing.T) {
 	t.Helper()
 	previous := db.Dao
-	database, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	database, err := gorm.Open(sqlite.New(sqlite.Config{DriverName: "sqlite", DSN: "file:" + t.Name() + "?mode=memory&cache=shared"}), &gorm.Config{})
 	require.NoError(t, err)
 	require.NoError(t, database.AutoMigrate(&models.CustomStrategy{}))
 	db.Dao = database

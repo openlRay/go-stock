@@ -3,13 +3,13 @@ package db
 import (
 	"testing"
 
-	"github.com/glebarez/sqlite"
+	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
 
 func TestMigrateAIConfigDefaultAddsColumnAndRepairsLegacyRows(t *testing.T) {
 	previous := Dao
-	database, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	database, err := gorm.Open(sqlite.New(sqlite.Config{DriverName: "sqlite", DSN: "file:" + t.Name() + "?mode=memory&cache=shared"}), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("open test db: %v", err)
 	}
@@ -54,7 +54,7 @@ func TestMigrateAIConfigDefaultAddsColumnAndRepairsLegacyRows(t *testing.T) {
 
 func TestMigrateAIConfigDefaultSkipsEmbeddingRows(t *testing.T) {
 	previous := Dao
-	database, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	database, err := gorm.Open(sqlite.New(sqlite.Config{DriverName: "sqlite", DSN: "file:" + t.Name() + "?mode=memory&cache=shared"}), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("open test db: %v", err)
 	}

@@ -9,14 +9,63 @@
 Docker 使用多阶段构建：
 
 1. Node 22 bookworm 构建 `frontend/dist`，保留 `NODE_OPTIONS=--max-old-space-size=4096`；当前依赖规模可能超过 Node 默认 heap。
-2. Go 1.26 bookworm 使用 `CGO_ENABLED=0 GOOS=linux -tags web` 构建 headless binary。
+2. Go 1.27 bookworm 使用 `CGO_ENABLED=0 GOOS=linux -tags web` 构建 headless binary。
 3. Debian bookworm runtime 安装 CA、Chromium、CJK 字体、SQLite CLI、curl 和 tzdata。
 
-`NODE_IMAGE`、`GO_IMAGE`、`RUNTIME_IMAGE`、`GOPROXY`、`GOSUMDB`、`DEBIAN_MIRROR` 是可替换供应源，不得改变 Node 22、Go 1.26、Debian bookworm 和 checksum verification 语义。
+`NODE_IMAGE`、`GO_IMAGE`、`RUNTIME_IMAGE`、`GOPROXY`、`GOSUMDB`、`DEBIAN_MIRROR` 是可替换供应源，不得改变 Node 22、Go 1.27、Debian bookworm 和 checksum verification 语义。
 
 - 受限网络的 Compose 默认 `GOPROXY` 不带 `direct`，避免 proxy miss 后长时间连接不可达 GitHub。
 - 保持 `GOSUMDB` 开启；不能通过关闭 checksum 解决依赖下载问题。
 - 修改镜像/代理参数后使用 `docker compose config` 检查最终展开值。
+
+## Scenario: Go 工具链版本联动
+
+### 1. Scope / Trigger
+
+当 `go.mod`、直接依赖的最低 Go 版本、Wails 版本或发布构建工具链任一发生变化时适用。
+
+### 2. Signatures
+
+- `go.mod`：`go 1.27.0`。
+- `Dockerfile`：`ARG GO_IMAGE=golang:1.27-bookworm`。
+- `compose.yaml`：默认 `GO_IMAGE` 镜像保持 Go 1.27 bookworm。
+- GitHub Actions：`go-version: '1.27'`，`wails-version: 'v2.15.0'`。
+
+### 3. Contracts
+
+本机、CI、Dockerfile 与 Compose 默认镜像必须满足 `go.mod` 及全部直接依赖的最低 Go 版本；镜像代理只可替换 registry，不得降级工具链版本或 Debian 基线。
+
+### 4. Validation & Error Matrix
+
+| 条件 | 处理 |
+| --- | --- |
+| 依赖要求高于 Docker Go 版本 | 阻断构建并同步升级 Dockerfile、Compose 与 CI |
+| 本机 Go 较旧但 `GOTOOLCHAIN=auto` 可用 | 允许下载匹配工具链，并在结果中记录实际版本 |
+| 镜像代理没有目标 Go tag | 更换等价 registry，不得回退 Go 版本 |
+| Wails CLI 与 `go.mod` Wails 版本不一致 | 使用 `go run ...@<版本>` 执行生成与构建，不覆盖全局 CLI |
+
+### 5. Good / Base / Bad Cases
+
+- Good：四处版本均为 Go 1.27，Wails 生成使用 v2.15.0，桌面与 Web build 通过。
+- Base：本机旧 Go 通过 `GOTOOLCHAIN=auto` 使用 1.27，仓库配置仍保持一致。
+- Bad：只更新 `go.mod`，Docker 继续使用 Go 1.26，导致容器在下载依赖或编译阶段失败。
+
+### 6. Tests Required
+
+- `go mod verify` 验证依赖 checksum。
+- `go build .` 与 Linux Web 交叉编译验证两条入口。
+- `docker compose config` 断言展开后的 `GO_IMAGE` 为 Go 1.27 bookworm。
+- 生成 binding 时记录实际 Wails CLI 与 Go toolchain 版本。
+
+### 7. Wrong vs Correct
+
+```dockerfile
+# Wrong：低于 go.mod 或依赖要求。
+ARG GO_IMAGE=golang:1.26-bookworm
+
+# Correct：与 go.mod、CI 和直接依赖最低版本一致。
+ARG GO_IMAGE=golang:1.27-bookworm
+```
 
 ## Scenario: Vite 静态资源完整嵌入
 

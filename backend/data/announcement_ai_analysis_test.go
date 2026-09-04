@@ -13,16 +13,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/glebarez/sqlite"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
 
 func useAnnouncementTestDB(t *testing.T) {
 	t.Helper()
 	previous := db.Dao
-	testDB, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	testDB, err := gorm.Open(sqlite.New(sqlite.Config{DriverName: "sqlite", DSN: "file:" + t.Name() + "?mode=memory&cache=shared"}), &gorm.Config{})
 	require.NoError(t, err)
 	require.NoError(t, testDB.AutoMigrate(&models.AnnouncementAIAnalysis{}, &AIConfig{}))
 	db.Dao = testDB

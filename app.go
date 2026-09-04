@@ -481,7 +481,7 @@ func (a *App) CheckUpdate(flag int) {
 		if IsMacOS() {
 			if err := ApplyMacUpdate(tmpPath); err != nil {
 				logger.SugaredLogger.Error("macOS 更新失败: ", err.Error())
-				go runtime.EventsEmit(a.ctx, "updateDownloadFailed", map[string]any{
+				go a.emit("updateDownloadFailed", map[string]any{
 					"downloadId": downloadID,
 					"version":    releaseVersion.TagName,
 					"error":      err.Error(),
@@ -492,7 +492,7 @@ func (a *App) CheckUpdate(flag int) {
 				})
 				return
 			}
-			go runtime.EventsEmit(a.ctx, "newsPush", map[string]any{
+			go a.emit("newsPush", map[string]any{
 				"time":    "新版本：" + releaseVersion.TagName,
 				"isRed":   true,
 				"source":  "go-stock",
@@ -3536,7 +3536,7 @@ func (a *App) ImportTradingRecordsFromExcel() (*data.TradingRecordImportResult, 
 func (a *App) ExportTradingRecordTemplate() (string, error) {
 	dialogOptions := runtime.SaveDialogOptions{
 		Title:           "保存交易记录导入模板",
-		DefaultFilename: "交易记录导入模板.txt",
+		DefaultFilename: data.TradingRecordTemplateFilename,
 		Filters: []runtime.FileFilter{
 			{DisplayName: "文本 (*.txt;*.csv)", Pattern: "*.txt;*.csv"},
 		},
@@ -3549,7 +3549,7 @@ func (a *App) ExportTradingRecordTemplate() (string, error) {
 		// 用户取消保存
 		return "", nil
 	}
-	if err := os.WriteFile(filePath, []byte(data.NewStockDataApi().TradingRecordTemplateContent()), 0644); err != nil {
+	if err := os.WriteFile(filePath, []byte((data.StockDataApi{}).TradingRecordTemplateContent()), 0644); err != nil {
 		return "", err
 	}
 	return filePath, nil

@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/glebarez/sqlite"
 	"github.com/robfig/cron/v3"
+	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
 
@@ -50,7 +50,7 @@ func (r *cronTaskEventRecorder) Emit(name string, args ...any) {
 
 func TestExecuteCronTaskNotificationBoundary(t *testing.T) {
 	previous := db.Dao
-	database, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	database, err := gorm.Open(sqlite.New(sqlite.Config{DriverName: "sqlite", DSN: "file:" + t.Name() + "?mode=memory&cache=shared"}), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("open test db: %v", err)
 	}
@@ -129,7 +129,7 @@ func TestExecuteCronTaskNotificationBoundary(t *testing.T) {
 
 func TestExecuteCronTaskStrategyScreeningUsesUnifiedNotificationBoundary(t *testing.T) {
 	previous := db.Dao
-	database, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	database, err := gorm.Open(sqlite.New(sqlite.Config{DriverName: "sqlite", DSN: "file:" + t.Name() + "?mode=memory&cache=shared"}), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("open test db: %v", err)
 	}
@@ -242,7 +242,7 @@ func TestTrimLeadingMarkdownHeadingPreservesHashTagText(t *testing.T) {
 
 func TestExecuteCronTaskSkipsCompletionSideEffectsWhenRunInfoPersistenceFails(t *testing.T) {
 	previous := db.Dao
-	database, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	database, err := gorm.Open(sqlite.New(sqlite.Config{DriverName: "sqlite", DSN: "file:" + t.Name() + "?mode=memory&cache=shared"}), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("open test db: %v", err)
 	}
@@ -282,7 +282,7 @@ func TestExecuteCronTaskSkipsCompletionSideEffectsWhenRunInfoPersistenceFails(t 
 
 func TestCronTaskScheduleRegistryUsesStableID(t *testing.T) {
 	previous := db.Dao
-	database, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	database, err := gorm.Open(sqlite.New(sqlite.Config{DriverName: "sqlite", DSN: "file:" + t.Name() + "?mode=memory&cache=shared"}), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("open test db: %v", err)
 	}

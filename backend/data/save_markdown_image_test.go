@@ -1,6 +1,7 @@
 package data
 
 import (
+	"go-stock/backend/runtimepath"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,6 +23,16 @@ const saveMarkdownImageTestMD = `# 测试报告：MarkdownToImage 工具
 - 评级: **买入**
 `
 
+func markdownSourceTestDir(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp(runtimepath.RootDir(), "go-stock-markdown-source-*")
+	if err != nil {
+		t.Fatalf("创建沙箱内测试目录失败: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	return dir
+}
+
 // TestLoadMarkdownSource_Branches 来源解析分支：
 // 空参数、markdown 优先、文件不存在、目录、空文件、BOM 剥离与基名提取。
 func TestLoadMarkdownSource_Branches(t *testing.T) {
@@ -39,7 +50,7 @@ func TestLoadMarkdownSource_Branches(t *testing.T) {
 		t.Errorf("内联分支返回不符: content=%q base=%q", content, base)
 	}
 
-	dir := t.TempDir()
+	dir := markdownSourceTestDir(t)
 
 	// 3. 文件不存在 → 报错
 	if _, _, err := loadMarkdownSource("", filepath.Join(dir, "nope.md")); err == nil {
@@ -78,6 +89,14 @@ func TestLoadMarkdownSource_Branches(t *testing.T) {
 	if base != "bom_report" {
 		t.Errorf("来源基名应为 bom_report，实际: %q", base)
 	}
+
+	outsideFile := filepath.Join(t.TempDir(), "outside.md")
+	if err := os.WriteFile(outsideFile, []byte("outside"), 0o644); err != nil {
+		t.Fatalf("写入沙箱外测试文件失败: %v", err)
+	}
+	if _, _, err := loadMarkdownSource("", outsideFile); err == nil || !strings.Contains(err.Error(), "沙箱") {
+		t.Fatalf("沙箱外文件应被拒绝，实际: %v", err)
+	}
 }
 
 // TestSaveMarkdownImageToFile_Oversize 超长内容拒绝（在渲染前拦截，不启动 Chrome）。
@@ -92,7 +111,7 @@ func TestSaveMarkdownImageToFile_Oversize(t *testing.T) {
 	}
 
 	// 文件超长同样在读取前由 stat 拦截
-	dir := t.TempDir()
+	dir := markdownSourceTestDir(t)
 	bigFile := filepath.Join(dir, "big.md")
 	if err := os.WriteFile(bigFile, []byte(big), 0o644); err != nil {
 		t.Fatalf("写入超长文件失败: %v", err)

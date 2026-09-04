@@ -242,6 +242,13 @@ function installAppProxy() {
       formData.append('file', file, file.name)
       return uploadWebForm('/api/trading-records/import', formData, '导入交易记录失败')
     },
+    async ExportTradingRecordTemplate() {
+      const response = await fetch('/api/trading-records/template')
+      if (!response.ok) throw new Error('下载交易记录模板失败')
+      const filename = response.headers.get('X-Download-Filename')
+      if (!filename) throw new Error('交易记录模板响应缺少文件名')
+      return downloadBlob(filename, await response.blob())
+    },
     async PickKBFilePath() {
       const file = await selectFile('.txt,.md,.markdown,text/plain,text/markdown')
       return file ? registerWebFile(file) : ''

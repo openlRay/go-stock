@@ -33,7 +33,6 @@ require (
 	github.com/eino-contrib/ollama v0.1.0
 	github.com/gen2brain/beeep v0.11.2
 	github.com/getlantern/systray v1.2.2
-	github.com/glebarez/sqlite v1.11.0
 	github.com/go-ego/gse v1.0.2
 	github.com/go-resty/resty/v2 v2.17.2
 	github.com/go-toast/toast v0.0.0-20190211030409-01e6764cf0a4
@@ -111,7 +110,6 @@ require (
 	github.com/getlantern/hex v0.0.0-20220104173244-ad7e4b9194dc // indirect
 	github.com/getlantern/hidden v0.0.0-20220104173330-f221c5a24770 // indirect
 	github.com/getlantern/ops v0.0.0-20231025133620-f368ab734534 // indirect
-	github.com/glebarez/go-sqlite v1.21.2 // indirect
 	github.com/go-json-experiment/json v0.0.0-20260623181947-01eb4420fa68 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect

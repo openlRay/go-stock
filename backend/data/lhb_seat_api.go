@@ -4,6 +4,9 @@ import (
 	_ "embed"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -13,7 +16,9 @@ import (
 
 	"go-stock/backend/logger"
 	"go-stock/backend/models"
+	"go-stock/backend/runtimepath"
 
+	"github.com/go-resty/resty/v2"
 	"github.com/tidwall/gjson"
 )
 
@@ -32,7 +37,12 @@ func NewLhbSeatApi() *LhbSeatApi {
 	return &LhbSeatApi{}
 }
 
-const lhbSeatDataURL = "https://datacenter-web.eastmoney.com/api/data/v1/get"
+const (
+	lhbSeatDataURL               = "https://datacenter-web.eastmoney.com/api/data/v1/get"
+	lhbRequestTimeout            = 15 * time.Second
+	lhbResponseMaxBytes    int64 = 8 << 20
+	hotMoneyRemoteMaxBytes       = 2 << 20
+)
 
 // normalizeLhbCode 归一化股票代码为纯数字（沪深的东财数据中心席位报表用 SECURITY_CODE 纯代码过滤）
 func normalizeLhbCode(stockCode string) string {
@@ -45,16 +55,67 @@ func normalizeLhbCode(stockCode string) string {
 	return code
 }
 
+func isValidLhbCode(stockCode string) bool {
+	if len(stockCode) != 6 {
+		return false
+	}
+	for _, char := range stockCode {
+		if char < '0' || char > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func normalizeLhbDate(date string) (string, bool) {
+	date = strings.TrimSpace(date)
+	if date == "" {
+		date = time.Now().Format("2006-01-02")
+	}
+	parsed, err := time.Parse("2006-01-02", date)
+	return date, err == nil && parsed.Format("2006-01-02") == date
+}
+
+func requestLhbData(params map[string]string) ([]byte, error) {
+	client := CreateHTTPClientWithTimeout(lhbRequestTimeout).SetRedirectPolicy(resty.NoRedirectPolicy())
+	resp, err := client.R().
+		SetHeader("Host", "datacenter-web.eastmoney.com").
+		SetHeader("Referer", "https://data.eastmoney.com/stock/tradedetail.html").
+		SetHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36").
+		SetQueryParams(params).
+		SetDoNotParseResponse(true).
+		Get(lhbSeatDataURL)
+	if err != nil {
+		return nil, err
+	}
+	if resp.RawBody() == nil {
+		return nil, fmt.Errorf("龙虎榜接口返回空响应")
+	}
+	defer resp.RawBody().Close()
+	if !resp.IsSuccess() {
+		return nil, fmt.Errorf("龙虎榜接口返回 HTTP %d", resp.StatusCode())
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.RawBody(), lhbResponseMaxBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("读取龙虎榜响应失败: %w", err)
+	}
+	if int64(len(body)) > lhbResponseMaxBytes {
+		return nil, fmt.Errorf("龙虎榜响应超过 %d 字节限制", lhbResponseMaxBytes)
+	}
+	return body, nil
+}
+
 // GetLhbSeatDetail 查询个股某交易日龙虎榜买5卖5席位明细。
 // date 为空取当天；返回买卖席位列表（含机构/游资/北向识别）。
 func (receiver LhbSeatApi) GetLhbSeatDetail(stockCode, date string) *models.LhbSeatDetailData {
 	stockCode = normalizeLhbCode(stockCode)
-	if date == "" {
-		date = time.Now().Format("2006-01-02")
-	}
+	date, validDate := normalizeLhbDate(date)
 	result := &models.LhbSeatDetailData{
 		StockCode: stockCode,
 		TradeDate: date,
+	}
+	if !isValidLhbCode(stockCode) || !validDate {
+		return result
 	}
 	var firstRow, sellFirstRow gjson.Result
 	result.BuySeats, firstRow = fetchLhbSeatList(stockCode, date, "RPT_BILLBOARD_DAILYDETAILSBUY", "BUY")
@@ -76,6 +137,12 @@ func (receiver LhbSeatApi) GetLhbSeatDetail(stockCode, date string) *models.LhbS
 func fetchLhbSeatList(stockCode, date, reportName, sortColumn string) ([]models.LhbSeatItem, gjson.Result) {
 	items := []models.LhbSeatItem{}
 	var firstRow gjson.Result
+	if !isValidLhbCode(stockCode) {
+		return items, firstRow
+	}
+	if normalizedDate, valid := normalizeLhbDate(date); !valid || normalizedDate != date {
+		return items, firstRow
+	}
 	params := map[string]string{
 		"sortColumns": sortColumn,
 		"sortTypes":   "-1",
@@ -87,17 +154,12 @@ func fetchLhbSeatList(stockCode, date, reportName, sortColumn string) ([]models.
 		"client":      "WEB",
 		"filter":      fmt.Sprintf(`(SECURITY_CODE="%s")(TRADE_DATE='%s')`, stockCode, date),
 	}
-	resp, err := SharedHTTPClient.SetTimeout(time.Duration(15)*time.Second).R().
-		SetHeader("Host", "datacenter-web.eastmoney.com").
-		SetHeader("Referer", "https://data.eastmoney.com/stock/tradedetail.html").
-		SetHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36").
-		SetQueryParams(params).
-		Get(lhbSeatDataURL)
+	body, err := requestLhbData(params)
 	if err != nil {
 		logger.SugaredLogger.Errorf("获取龙虎榜席位明细失败(%s %s %s): %v", stockCode, date, reportName, err)
 		return items, firstRow
 	}
-	arr := gjson.Get(string(resp.Body()), "result.data").Array()
+	arr := gjson.GetBytes(body, "result.data").Array()
 	// 同一席位可能因多个上榜原因(EXPLANATION)重复出现（如"日涨幅偏离7%"+
 	// "三日涨幅偏离20%"各返回一次），按席位名去重，保留成交额最大的一行，
 	// 否则前端展示与游资动向聚合金额会翻倍
@@ -213,7 +275,7 @@ type HotMoneySeatFile struct {
 	SpecialSeats HotMoneySpecialSeats `json:"special_seats"`
 }
 
-const hotMoneySeatsFile = "data/hot_money_seats.json"
+var hotMoneySeatsFile = filepath.Join(runtimepath.RootDir(), "data", "hot_money_seats.json")
 
 // defaultHotMoneySeatsRemoteURL 默认远程名录源（上游仓库 dev 分支）
 const defaultHotMoneySeatsRemoteURL = "https://gh-proxy.com/https://github.com/ArvinLovegood/go-stock/blob/dev/data/hot_money_seats.json"
@@ -238,6 +300,29 @@ func normalizeRemoteSeatURL(url string) string {
 		return u[:idx] + "raw.githubusercontent.com/" + parts[0] + "/" + parts[1] + "/" + parts[3] + "/" + parts[4]
 	}
 	return u
+}
+
+// validateRemoteSeatURL 在发出服务端请求前拒绝明文、凭据和明显的本机/私网目标，
+// 并配合禁止 redirect 的 HTTP client 防止远程名录入口被用作 SSRF 跳板。
+func validateRemoteSeatURL(rawURL string) error {
+	parsed, err := url.ParseRequestURI(rawURL)
+	if err != nil || parsed.Hostname() == "" {
+		return fmt.Errorf("远程名录 URL 格式无效")
+	}
+	if parsed.Scheme != "https" {
+		return fmt.Errorf("远程名录 URL 仅支持 HTTPS")
+	}
+	if parsed.User != nil {
+		return fmt.Errorf("远程名录 URL 不允许包含用户凭据")
+	}
+	host := strings.ToLower(strings.TrimSuffix(parsed.Hostname(), "."))
+	if host == "localhost" || strings.HasSuffix(host, ".localhost") || strings.HasSuffix(host, ".local") {
+		return fmt.Errorf("远程名录 URL 不允许访问本机或局域网地址")
+	}
+	if ip := net.ParseIP(host); ip != nil && (ip.IsLoopback() || ip.IsPrivate() || ip.IsUnspecified() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast()) {
+		return fmt.Errorf("远程名录 URL 不允许访问本机或局域网地址")
+	}
+	return nil
 }
 
 // hotMoneyIndexEntry 归一化后的索引条目（用于席位全称模糊匹配）
@@ -432,14 +517,33 @@ func RefreshHotMoneySeats(url string) error {
 	if rawURL == "" {
 		return fmt.Errorf("远程名录 URL 为空")
 	}
-	resp, err := SharedHTTPClient.SetTimeout(time.Duration(15)*time.Second).R().
+	if err := validateRemoteSeatURL(rawURL); err != nil {
+		return err
+	}
+	client := CreateHTTPClientWithTimeout(lhbRequestTimeout).SetRedirectPolicy(resty.NoRedirectPolicy())
+	resp, err := client.R().
 		SetHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36").
+		SetDoNotParseResponse(true).
 		Get(rawURL)
 	if err != nil {
 		return fmt.Errorf("拉取游资名录失败: %w", err)
 	}
+	if resp.RawBody() == nil {
+		return fmt.Errorf("远程游资名录返回空响应")
+	}
+	defer resp.RawBody().Close()
+	if !resp.IsSuccess() {
+		return fmt.Errorf("远程游资名录返回 HTTP %d", resp.StatusCode())
+	}
+	raw, err := io.ReadAll(io.LimitReader(resp.RawBody(), hotMoneyRemoteMaxBytes+1))
+	if err != nil {
+		return fmt.Errorf("读取远程游资名录失败: %w", err)
+	}
+	if len(raw) > hotMoneyRemoteMaxBytes {
+		return fmt.Errorf("远程游资名录超过 %d 字节限制", hotMoneyRemoteMaxBytes)
+	}
 	var f HotMoneySeatFile
-	if err := json.Unmarshal(resp.Body(), &f); err != nil {
+	if err := json.Unmarshal(raw, &f); err != nil {
 		return fmt.Errorf("游资名录 JSON 解析失败（URL 需指向 JSON 原始文件而非网页）: %w", err)
 	}
 	if len(f.HotMoneyList) == 0 {
@@ -562,6 +666,9 @@ type lhbBillboardStock struct {
 
 // fetchLhbBillboardStocks 拉取某交易日全部上榜个股（复用 RPT_DAILYBILLBOARD_DETAILSNEW 榜单报表）
 func fetchLhbBillboardStocks(date string) []lhbBillboardStock {
+	if normalizedDate, valid := normalizeLhbDate(date); !valid || normalizedDate != date {
+		return nil
+	}
 	params := map[string]string{
 		"sortColumns": "TURNOVERRATE,TRADE_DATE,SECURITY_CODE",
 		"sortTypes":   "-1,-1,1",
@@ -573,12 +680,7 @@ func fetchLhbBillboardStocks(date string) []lhbBillboardStock {
 		"client":      "WEB",
 		"filter":      fmt.Sprintf("(TRADE_DATE<='%s')(TRADE_DATE>='%s')", date, date),
 	}
-	resp, err := SharedHTTPClient.SetTimeout(time.Duration(15)*time.Second).R().
-		SetHeader("Host", "datacenter-web.eastmoney.com").
-		SetHeader("Referer", "https://data.eastmoney.com/stock/tradedetail.html").
-		SetHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36").
-		SetQueryParams(params).
-		Get(lhbSeatDataURL)
+	body, err := requestLhbData(params)
 	if err != nil {
 		logger.SugaredLogger.Errorf("获取龙虎榜榜单失败(%s): %v", date, err)
 		return nil
@@ -586,7 +688,7 @@ func fetchLhbBillboardStocks(date string) []lhbBillboardStock {
 	// 同一股票可能因多个上榜原因(EXPLANATION)重复出现，按代码去重
 	var stocks []lhbBillboardStock
 	seen := map[string]bool{}
-	for _, row := range gjson.Get(string(resp.Body()), "result.data").Array() {
+	for _, row := range gjson.GetBytes(body, "result.data").Array() {
 		s := lhbBillboardStock{
 			StockCode:  row.Get("SECURITY_CODE").String(),
 			StockName:  row.Get("SECURITY_NAME_ABBR").String(),
@@ -605,8 +707,9 @@ func fetchLhbBillboardStocks(date string) []lhbBillboardStock {
 // GetLhbDailySummary 汇总某交易日龙虎榜游资/机构动向：
 // 拉取当日上榜个股列表，并发抓取每只个股买5卖5席位明细，按游资/机构聚合。
 func (receiver LhbSeatApi) GetLhbDailySummary(date string) *models.LhbDailySummary {
-	if date == "" {
-		date = time.Now().Format("2006-01-02")
+	date, validDate := normalizeLhbDate(date)
+	if !validDate {
+		return &models.LhbDailySummary{Date: date}
 	}
 	lhbDailySummaryMu.Lock()
 	if c, ok := lhbDailySummaryCache[date]; ok {

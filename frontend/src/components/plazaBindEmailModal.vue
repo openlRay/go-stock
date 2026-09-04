@@ -113,6 +113,7 @@ async function handleBind() {
     preset="card"
     style="width: 400px"
     title="绑定邮箱"
+    :mask-closable="false"
     @update:show="val => emit('update:show', val)"
   >
     <n-space vertical :size="12">

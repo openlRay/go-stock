@@ -1,15 +1,21 @@
 package data
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"go-stock/backend/db"
 )
 
 func TestLhbSeatDetail(t *testing.T) {
+	if os.Getenv("GO_STOCK_RUN_LIVE_TESTS") != "1" {
+		t.Skip("设置 GO_STOCK_RUN_LIVE_TESTS=1 后运行真实龙虎榜接口测试")
+	}
 	db.Init("../../data/stock.db")
 	api := NewLhbSeatApi()
 	detail := api.GetLhbSeatDetail("600077", "2022-03-10")
@@ -70,6 +76,9 @@ func TestLhbSeatDetail(t *testing.T) {
 
 // TestLhbDailySummary 验证当日游资/机构动向汇总（真实数据，2022-03-10 上榜约 40+ 只）
 func TestLhbDailySummary(t *testing.T) {
+	if os.Getenv("GO_STOCK_RUN_LIVE_TESTS") != "1" {
+		t.Skip("设置 GO_STOCK_RUN_LIVE_TESTS=1 后运行真实龙虎榜接口测试")
+	}
 	db.Init("../../data/stock.db")
 	api := NewLhbSeatApi()
 	summary := api.GetLhbDailySummary("2022-03-10")
@@ -124,16 +133,74 @@ func TestNormalizeRemoteSeatURL(t *testing.T) {
 			t.Errorf("normalizeRemoteSeatURL(%s) = %s, want %s", c.in, got, c.want)
 		}
 	}
+	for _, rawURL := range []string{
+		"http://example.com/seats.json",
+		"file:///etc/passwd",
+		"https://localhost/seats.json",
+		"https://127.0.0.1/seats.json",
+		"https://192.168.1.10/seats.json",
+		"https://user:password@example.com/seats.json",
+	} {
+		if err := validateRemoteSeatURL(rawURL); err == nil {
+			t.Errorf("validateRemoteSeatURL(%q) 应拒绝危险地址", rawURL)
+		}
+	}
+	if err := validateRemoteSeatURL("https://example.com/seats.json"); err != nil {
+		t.Fatalf("合法 HTTPS 地址被拒绝: %v", err)
+	}
+}
+
+func TestNormalizeLhbInputs(t *testing.T) {
+	for _, stockCode := range []string{"600519", "000001"} {
+		if !isValidLhbCode(stockCode) {
+			t.Errorf("isValidLhbCode(%q) = false", stockCode)
+		}
+	}
+	for _, stockCode := range []string{"", "60051", "600519x", `600519\")`} {
+		if isValidLhbCode(stockCode) {
+			t.Errorf("isValidLhbCode(%q) = true", stockCode)
+		}
+	}
+	if date, ok := normalizeLhbDate("2026-09-04"); !ok || date != "2026-09-04" {
+		t.Fatalf("normalizeLhbDate() = %q, %v", date, ok)
+	}
+	for _, date := range []string{"2026-02-30", "2026/09/04", `2026-09-04')`} {
+		if _, ok := normalizeLhbDate(date); ok {
+			t.Errorf("normalizeLhbDate(%q) 应拒绝非法日期", date)
+		}
+	}
+}
+
+func useHotMoneySeatTestFile(t *testing.T) {
+	t.Helper()
+	previousFile := hotMoneySeatsFile
+	hotMoneySeatsFile = filepath.Join(t.TempDir(), "hot_money_seats.json")
+	hotMoneySeatsOnce = sync.Once{}
+	hotMoneySeatIndex = nil
+	t.Cleanup(func() {
+		hotMoneySeatsFile = previousFile
+		hotMoneySeatsOnce = sync.Once{}
+		hotMoneySeatIndex = nil
+	})
 }
 
 // TestHotMoneySeatsExternalFile 验证外置 JSON 名录（新标准格式）加载与匹配
 func TestHotMoneySeatsExternalFile(t *testing.T) {
+	useHotMoneySeatTestFile(t)
+	seed := builtinHotMoneySeatsSeed()
+	seed.RemoteURL = ""
+	raw, err := json.Marshal(seed)
+	if err != nil {
+		t.Fatalf("序列化测试名录失败: %v", err)
+	}
+	if err := os.WriteFile(hotMoneySeatsFile, raw, 0o644); err != nil {
+		t.Fatalf("写入测试名录失败: %v", err)
+	}
 	idx := loadHotMoneySeatIndex()
 	if len(idx) == 0 {
 		t.Fatal("游资名录索引为空")
 	}
-	// 测试运行目录为 backend/data，外置文件在 <root>/data/hot_money_seats.json；
-	// 相对路径不存在时回退内置种子（seed 同样为新标准格式）
+	// 测试使用独立临时文件，不能读写真实 runtime root 下的名录。
 	if hm := matchHotMoneySeat("中国银河证券股份有限公司绍兴证券营业部"); hm != "赵老哥" {
 		t.Errorf("matchHotMoneySeat(银河绍兴) = %s, want 赵老哥", hm)
 	}
@@ -142,12 +209,11 @@ func TestHotMoneySeatsExternalFile(t *testing.T) {
 
 // TestHotMoneySeatsSaveReset 验证名录保存（校验+落盘+索引热更新）与重置回环
 func TestHotMoneySeatsSaveReset(t *testing.T) {
-	// 备份当前文件内容，测试后还原
-	orig, readErr := os.ReadFile(hotMoneySeatsFile)
-	origExists := readErr == nil
+	useHotMoneySeatTestFile(t)
 
 	// 保存自定义名录：含新增游资，应即时生效
 	custom := builtinHotMoneySeatsSeed()
+	custom.RemoteURL = ""
 	custom.HotMoneyList = append(custom.HotMoneyList, HotMoneySeat{
 		Name: "测试游资", Tier: "测试梯队", Style: "测试风格", Risk: "低",
 		Seats: []HotMoneySeatBranch{{Branch: "测试证券测试路证券营业部", Primary: true}},
@@ -174,12 +240,4 @@ func TestHotMoneySeatsSaveReset(t *testing.T) {
 		t.Errorf("重置后测试游资应被清除: %s", hm)
 	}
 
-	// 还原原始文件
-	if origExists {
-		if err := os.WriteFile(hotMoneySeatsFile, orig, 0644); err != nil {
-			t.Logf("还原原始名录文件失败(不影响断言): %v", err)
-		}
-	} else {
-		_ = os.Remove(hotMoneySeatsFile)
-	}
 }

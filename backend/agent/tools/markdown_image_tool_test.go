@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"go-stock/backend/db"
+	"go-stock/backend/runtimepath"
 )
 
 // TestMarkdownToImageTool_ArgValidation 工具入参校验分支（不启动 Chrome）：
@@ -146,7 +147,12 @@ func TestMarkdownToImageTool_RenderInline(t *testing.T) {
 func TestMarkdownToImageTool_RenderFromFile(t *testing.T) {
 	initRenderTestDB(t)
 
-	src := filepath.Join(t.TempDir(), "tool_report.md")
+	dir, err := os.MkdirTemp(runtimepath.RootDir(), "go-stock-markdown-tool-*")
+	if err != nil {
+		t.Fatalf("创建沙箱内测试目录失败: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	src := filepath.Join(dir, "tool_report.md")
 	if err := os.WriteFile(src, []byte(renderTestMD), 0o644); err != nil {
 		t.Fatalf("写入源 markdown 文件失败: %v", err)
 	}

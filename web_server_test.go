@@ -5,6 +5,7 @@ package main
 import (
 	"archive/zip"
 	"bytes"
+	_ "embed"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -24,7 +25,7 @@ import (
 	"testing/fstest"
 	"time"
 
-	"github.com/glebarez/sqlite"
+	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
 
@@ -33,6 +34,9 @@ type webTestUploadFile struct {
 	fileName  string
 	content   []byte
 }
+
+//go:embed frontend/src/web-bridge.js
+var webBridgeSource string
 
 func TestEmbeddedFrontendIncludesLeadingUnderscoreAssets(t *testing.T) {
 	matches, err := fs.Glob(assets, "frontend/dist/assets/_commonjsHelpers-*.js")
@@ -125,6 +129,9 @@ func TestLoadWebBindingMethods(t *testing.T) {
 		"ChatWithAgentKBQA", "CreateKnowledgeBase", "GetUserProfile",
 		"SubmitAgentFeedback", "RunRecommendBacktest",
 		"GetMottos", "CreateMotto", "UpdateMotto", "DeleteMotto", "PolishMotto",
+		"GetProfileLearnAiConfigId", "SetProfileLearnAiConfigId",
+		"GetLhbSeatDetail", "GetLhbDailySummary",
+		"GetHotMoneySeats", "SaveHotMoneySeats", "ResetHotMoneySeats", "RefreshHotMoneySeats",
 		"TestAIConfig",
 		"PackSkillToBase64", "ImportSkillFromBase64",
 	} {
@@ -138,11 +145,53 @@ func TestLoadWebBindingMethods(t *testing.T) {
 		}
 	}
 	for _, name := range []string{
-		"ImportTradingRecordsFromExcel", "PickKBFilePath", "PickKBFilePaths",
+		"ExportTradingRecordTemplate", "ImportTradingRecordsFromExcel", "PickKBFilePath", "PickKBFilePaths",
 		"UploadKBFile", "UploadKBFiles",
 	} {
 		if _, ok := methods[name]; ok {
 			t.Fatalf("server-file method %s must be hidden from Web RPC", name)
+		}
+	}
+}
+
+func TestWebTradingRecordTemplate(t *testing.T) {
+	api := &webAPI{}
+	recorder := httptest.NewRecorder()
+	api.tradingRecordTemplate(recorder, httptest.NewRequest(http.MethodGet, "/api/trading-records/template", nil))
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d", recorder.Code)
+	}
+	if got := recorder.Header().Get("Content-Type"); got != "text/plain; charset=utf-8" {
+		t.Fatalf("Content-Type = %q", got)
+	}
+	if got := recorder.Header().Get("Content-Disposition"); !strings.Contains(got, "attachment") {
+		t.Fatalf("Content-Disposition = %q", got)
+	}
+	if got := recorder.Header().Get("X-Download-Filename"); got != data.TradingRecordTemplateFilename {
+		t.Fatalf("X-Download-Filename = %q", got)
+	}
+	want := (data.StockDataApi{}).TradingRecordTemplateContent()
+	if got := recorder.Body.String(); got != want {
+		t.Fatalf("template body = %q, want %q", got, want)
+	}
+
+	recorder = httptest.NewRecorder()
+	api.tradingRecordTemplate(recorder, httptest.NewRequest(http.MethodPost, "/api/trading-records/template", nil))
+	if recorder.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("POST status = %d", recorder.Code)
+	}
+}
+
+func TestWebBridgeProvidesTradingRecordTemplateDownload(t *testing.T) {
+	for _, snippet := range []string{
+		"async ExportTradingRecordTemplate()",
+		"fetch('/api/trading-records/template')",
+		"response.headers.get('X-Download-Filename')",
+		"downloadBlob(filename",
+	} {
+		if !strings.Contains(webBridgeSource, snippet) {
+			t.Fatalf("web-bridge 缺少交易记录模板下载实现: %s", snippet)
 		}
 	}
 }
@@ -246,7 +295,7 @@ func TestCallWebMethod(t *testing.T) {
 
 func TestCallWebMottoMethods(t *testing.T) {
 	previous := db.Dao
-	database, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	database, err := gorm.Open(sqlite.New(sqlite.Config{DriverName: "sqlite", DSN: "file:" + t.Name() + "?mode=memory&cache=shared"}), &gorm.Config{})
 	if err != nil {
 		t.Fatalf("open test db: %v", err)
 	}

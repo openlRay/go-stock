@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"go-stock/backend/logger"
+	"go-stock/backend/runtimepath"
 	"html"
 	"os"
 	"path/filepath"
@@ -521,17 +522,13 @@ func markdownImageSanitizeFilename(name string) string {
 	return out
 }
 
-// MarkdownImageDir 返回 AI 生成的 markdown 图片保存目录（<可执行文件目录>/logs/agent_images）。
-// 目录不存在时自动创建，返回创建后的绝对路径；获取失败时降级为当前工作目录下同名目录。
+// MarkdownImageDir 返回 AI 生成的 markdown 图片保存目录。
+// Web 与桌面模式统一从 runtime root 派生，确保 Docker volume 与桌面安装目录语义一致。
 func MarkdownImageDir() (string, error) {
-	rootDir, err := os.Executable()
-	if err != nil || rootDir == "" {
-		rootDir, err = os.Getwd()
-		if err != nil {
-			return "", fmt.Errorf("获取程序目录失败: %w", err)
-		}
+	dir, err := filepath.Abs(filepath.Join(runtimepath.RootDir(), "logs", "agent_images"))
+	if err != nil {
+		return "", fmt.Errorf("解析图片目录失败: %w", err)
 	}
-	dir := filepath.Join(filepath.Dir(rootDir), "logs", "agent_images")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", fmt.Errorf("创建图片目录失败 %q: %w", dir, err)
 	}
@@ -599,7 +596,10 @@ func loadMarkdownSource(markdown, filePath string) (string, string, error) {
 	if path == "" {
 		return "", "", fmt.Errorf("markdown 与 filePath 参数至少提供一个")
 	}
-	path = resolveMarkdownFilePath(path)
+	path, err := resolveMarkdownFilePath(path)
+	if err != nil {
+		return "", "", err
+	}
 	info, err := os.Stat(path)
 	if err != nil {
 		return "", "", fmt.Errorf("读取文件失败 %q: %w", path, err)
@@ -623,21 +623,34 @@ func loadMarkdownSource(markdown, filePath string) (string, string, error) {
 	return string(raw), base, nil
 }
 
-// resolveMarkdownFilePath 解析 markdown 文件路径：相对路径优先按进程工作目录解析，
-// 不存在时回退到可执行文件目录（与 DeepAgents 文件沙箱根一致，便于渲染 Agent 自己写出的文件）。
-func resolveMarkdownFilePath(path string) string {
-	if _, err := os.Stat(path); err == nil {
-		return path
+// resolveMarkdownFilePath 只允许读取 runtime root 内的文件，并在检查时解析 symlink，
+// 防止模型通过绝对路径、.. 或符号链接越过 Agent 文件沙箱。
+func resolveMarkdownFilePath(path string) (string, error) {
+	root, err := filepath.Abs(runtimepath.RootDir())
+	if err != nil {
+		return "", fmt.Errorf("解析 Agent 文件沙箱失败: %w", err)
 	}
-	if !filepath.IsAbs(path) {
-		if exePath, err := os.Executable(); err == nil && exePath != "" {
-			candidate := filepath.Join(filepath.Dir(exePath), path)
-			if _, err := os.Stat(candidate); err == nil {
-				return candidate
-			}
-		}
+	candidate := path
+	if !filepath.IsAbs(candidate) {
+		candidate = filepath.Join(root, candidate)
 	}
-	return path
+	candidate, err = filepath.Abs(candidate)
+	if err != nil {
+		return "", fmt.Errorf("解析 markdown 文件路径失败: %w", err)
+	}
+	resolved, err := filepath.EvalSymlinks(candidate)
+	if err != nil {
+		return "", fmt.Errorf("读取文件失败 %q: %w", candidate, err)
+	}
+	resolvedRoot, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		resolvedRoot = root
+	}
+	relative, err := filepath.Rel(resolvedRoot, resolved)
+	if err != nil || relative == ".." || strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("markdown 文件必须位于 Agent 文件沙箱内")
+	}
+	return resolved, nil
 }
 
 func urlEscapeSimpleSVG() string {

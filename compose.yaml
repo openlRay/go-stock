@@ -6,7 +6,7 @@ services:
       dockerfile: Dockerfile
       args:
         NODE_IMAGE: "${NODE_IMAGE:-docker.m.daocloud.io/library/node:22-bookworm-slim}"
-        GO_IMAGE: "${GO_IMAGE:-docker.m.daocloud.io/library/golang:1.26-bookworm}"
+        GO_IMAGE: "${GO_IMAGE:-docker.m.daocloud.io/library/golang:1.27-bookworm}"
         GOPROXY: "${GOPROXY:-https://goproxy.cn}"
         GOSUMDB: "${GOSUMDB:-sum.golang.org}"
         RUNTIME_IMAGE: "${RUNTIME_IMAGE:-docker.m.daocloud.io/library/debian:bookworm-slim}"

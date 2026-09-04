@@ -3542,6 +3542,9 @@ func (receiver StockDataApi) ImportTradingRecords(filePath string) (*TradingReco
 
 // tradingRecordTemplateCSV 导入模板内容：Tab 分隔（与 parseTradingImportFile 及主流券商导出格式一致）。
 // 列顺序与「成交日期/成交时间/证券代码/证券名称/市场名称/操作/成交均价/成交数量/手续费/印花税/其他杂费」
+// TradingRecordTemplateFilename 是桌面与 Web 下载共用的交易记录模板文件名。
+const TradingRecordTemplateFilename = "交易记录导入模板.txt"
+
 // 导入解析所需列对齐；前两行以 # 开头的说明会被解析器当作数据行自然失败跳过（操作非买入/卖出）。
 const tradingRecordTemplateCSV = `# go-stock 交易记录导入模板（Tab 分隔文本，可保存为 .txt 或 .csv，或用 Excel 编辑后另存为文本）
 # 1. 推荐直接从券商软件导出「历史成交/交割单」后导入，无需使用本模板（常见券商路径：交易-查询-历史成交/交割单，选好日期区间导出 .xls/.csv）

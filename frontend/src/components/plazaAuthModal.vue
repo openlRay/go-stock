@@ -17,9 +17,7 @@ import {useMessage} from "naive-ui"
 const props = defineProps({
   show: {type: Boolean, default: false},
   tab: {type: String, default: 'login'},
-  apiBase: {type: String, required: true},
-  // VIP 强制登录模式：弹窗不可关闭（沿用 promptPlaza 原有交互）
-  vipRequireLogin: {type: Boolean, default: false}
+  apiBase: {type: String, required: true}
 })
 
 const emit = defineEmits(['update:show', 'update:tab', 'logged-in'])
@@ -330,23 +328,10 @@ function goForgot() {
     :show="show"
     preset="card"
     style="width: 400px"
-    :title="vipRequireLogin ? '🎉 VIP专属福利' : '账号'"
-    :closable="!vipRequireLogin"
-    :maskClosable="!vipRequireLogin"
-    :closeOnEsc="!vipRequireLogin"
+    title="账号"
+    :mask-closable="false"
     @update:show="val => emit('update:show', val)"
   >
-    <div v-if="vipRequireLogin" style="margin-bottom: 16px; padding: 12px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border-radius: 8px; color: #fff">
-      <div style="font-size: 15px; font-weight: 600; margin-bottom: 8px">✨ 欢迎回来，VIP用户！</div>
-      <div style="font-size: 13px; line-height: 1.6; opacity: 0.95">
-        登录后即可解锁专属权益：
-        <div style="margin-top: 6px; padding-left: 8px">
-          📖 查看 <b>VIP专属提示词</b>，获取更精准的分析策略<br/>
-          🔒 自动绑定当前设备，保障账号安全<br/>
-          💡 与社区用户共享投资灵感
-        </div>
-      </div>
-    </div>
     <n-tabs :value="tab" type="line" @update:value="switchTab">
       <n-tab-pane name="login" tab="登录">
         <n-space vertical :size="12">
