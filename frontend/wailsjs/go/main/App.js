@@ -206,6 +206,10 @@ export function DeleteDailyOperationPlan(arg1) {
   return window['go']['main']['App']['DeleteDailyOperationPlan'](arg1);
 }
 
+export function DeleteDailyReview(arg1) {
+  return window['go']['main']['App']['DeleteDailyReview'](arg1);
+}
+
 export function DeleteFilesystemSkill(arg1) {
   return window['go']['main']['App']['DeleteFilesystemSkill'](arg1);
 }
@@ -224,6 +228,10 @@ export function DeleteKnowledgeBase(arg1) {
 
 export function DeleteMCPServer(arg1) {
   return window['go']['main']['App']['DeleteMCPServer'](arg1);
+}
+
+export function DeleteMorningStrategy(arg1) {
+  return window['go']['main']['App']['DeleteMorningStrategy'](arg1);
 }
 
 export function DeleteMotto(arg1) {
@@ -250,12 +258,20 @@ export function DeleteTradingRecord(arg1) {
   return window['go']['main']['App']['DeleteTradingRecord'](arg1);
 }
 
+export function DisableFilesystemSkill(arg1) {
+  return window['go']['main']['App']['DisableFilesystemSkill'](arg1);
+}
+
 export function EMDictCode(arg1) {
   return window['go']['main']['App']['EMDictCode'](arg1);
 }
 
 export function EnableCronTask(arg1, arg2) {
   return window['go']['main']['App']['EnableCronTask'](arg1, arg2);
+}
+
+export function EnableFilesystemSkill(arg1) {
+  return window['go']['main']['App']['EnableFilesystemSkill'](arg1);
 }
 
 export function EnableMCPServer(arg1, arg2) {
@@ -272,6 +288,10 @@ export function ExecuteCronTaskNow(arg1) {
 
 export function ExportConfig() {
   return window['go']['main']['App']['ExportConfig']();
+}
+
+export function ExportTableToXLSX(arg1, arg2) {
+  return window['go']['main']['App']['ExportTableToXLSX'](arg1, arg2);
 }
 
 export function ExportTradingRecordTemplate() {
@@ -300,6 +320,14 @@ export function Follow(arg1) {
 
 export function FollowFund(arg1) {
   return window['go']['main']['App']['FollowFund'](arg1);
+}
+
+export function GenerateDailyReviewNow(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['GenerateDailyReviewNow'](arg1, arg2, arg3, arg4);
+}
+
+export function GenerateMorningStrategyNow(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['GenerateMorningStrategyNow'](arg1, arg2, arg3, arg4);
 }
 
 export function GenerateStrategyCondition(arg1) {
@@ -352,6 +380,10 @@ export function GetAllConcepts() {
 
 export function GetAllCustomStrategies() {
   return window['go']['main']['App']['GetAllCustomStrategies']();
+}
+
+export function GetAllDeptPolicyNews(arg1) {
+  return window['go']['main']['App']['GetAllDeptPolicyNews'](arg1);
 }
 
 export function GetAllGroupStocks() {
@@ -408,6 +440,10 @@ export function GetAllTdxTransactionData(arg1) {
 
 export function GetAnnouncementAIAnalysis(arg1) {
   return window['go']['main']['App']['GetAnnouncementAIAnalysis'](arg1);
+}
+
+export function GetBKConstituentStocks(arg1) {
+  return window['go']['main']['App']['GetBKConstituentStocks'](arg1);
 }
 
 export function GetBKFundFlowList(arg1, arg2) {
@@ -494,6 +530,14 @@ export function GetDailyOperationPlanList(arg1) {
   return window['go']['main']['App']['GetDailyOperationPlanList'](arg1);
 }
 
+export function GetDailyReviewByDate(arg1) {
+  return window['go']['main']['App']['GetDailyReviewByDate'](arg1);
+}
+
+export function GetDailyReviewList(arg1, arg2) {
+  return window['go']['main']['App']['GetDailyReviewList'](arg1, arg2);
+}
+
 export function GetFeishuBotStatus() {
   return window['go']['main']['App']['GetFeishuBotStatus']();
 }
@@ -536,6 +580,10 @@ export function GetFuturesPositionTrend(arg1, arg2, arg3) {
 
 export function GetGlobalIndexTrend(arg1) {
   return window['go']['main']['App']['GetGlobalIndexTrend'](arg1);
+}
+
+export function GetGovDepartments() {
+  return window['go']['main']['App']['GetGovDepartments']();
 }
 
 export function GetGroupList() {
@@ -590,12 +638,28 @@ export function GetKBVectorizingStatus(arg1) {
   return window['go']['main']['App']['GetKBVectorizingStatus'](arg1);
 }
 
+export function GetKeyDepartments() {
+  return window['go']['main']['App']['GetKeyDepartments']();
+}
+
+export function GetKeyDeptPolicyNews(arg1) {
+  return window['go']['main']['App']['GetKeyDeptPolicyNews'](arg1);
+}
+
 export function GetKnowledgeBase(arg1) {
   return window['go']['main']['App']['GetKnowledgeBase'](arg1);
 }
 
 export function GetKoreaDayKLine(arg1, arg2) {
   return window['go']['main']['App']['GetKoreaDayKLine'](arg1, arg2);
+}
+
+export function GetLatestDailyReview() {
+  return window['go']['main']['App']['GetLatestDailyReview']();
+}
+
+export function GetLatestMorningStrategy() {
+  return window['go']['main']['App']['GetLatestMorningStrategy']();
 }
 
 export function GetLatestTradingDay() {
@@ -646,8 +710,20 @@ export function GetMoneyRankSina(arg1) {
   return window['go']['main']['App']['GetMoneyRankSina'](arg1);
 }
 
+export function GetMorningStrategyByDate(arg1) {
+  return window['go']['main']['App']['GetMorningStrategyByDate'](arg1);
+}
+
+export function GetMorningStrategyList(arg1, arg2) {
+  return window['go']['main']['App']['GetMorningStrategyList'](arg1, arg2);
+}
+
 export function GetMottos() {
   return window['go']['main']['App']['GetMottos']();
+}
+
+export function GetPolicyNews(arg1, arg2) {
+  return window['go']['main']['App']['GetPolicyNews'](arg1, arg2);
 }
 
 export function GetProfileLearnAiConfigId() {
@@ -732,6 +808,10 @@ export function GetStockMoneyTrendByDay(arg1, arg2) {
 
 export function GetStockRealTimePrice(arg1) {
   return window['go']['main']['App']['GetStockRealTimePrice'](arg1);
+}
+
+export function GetStoredPolicyNews(arg1, arg2, arg3, arg4) {
+  return window['go']['main']['App']['GetStoredPolicyNews'](arg1, arg2, arg3, arg4);
 }
 
 export function GetTdxCallAuction(arg1, arg2, arg3) {
@@ -1078,6 +1158,10 @@ export function SaveImage(arg1, arg2) {
   return window['go']['main']['App']['SaveImage'](arg1, arg2);
 }
 
+export function SaveKeyDepartments(arg1) {
+  return window['go']['main']['App']['SaveKeyDepartments'](arg1);
+}
+
 export function SaveStockChangesToHistory(arg1) {
   return window['go']['main']['App']['SaveStockChangesToHistory'](arg1);
 }
@@ -1252,6 +1336,10 @@ export function UpdateDailyOperationPlanAlert(arg1, arg2) {
 
 export function UpdateDailyOperationPlanStatus(arg1, arg2) {
   return window['go']['main']['App']['UpdateDailyOperationPlanStatus'](arg1, arg2);
+}
+
+export function UpdateFilesystemSkillDescription(arg1, arg2) {
+  return window['go']['main']['App']['UpdateFilesystemSkillDescription'](arg1, arg2);
 }
 
 export function UpdateGroup(arg1, arg2) {

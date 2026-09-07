@@ -16,7 +16,9 @@ const routes = [
   { path: '/mcp-servers', component: () => import('../components/mcp-server-manager.vue'), name: 'mcpServers' },
   { path: '/kline-analysis', component: () => import('../components/kline-analysis.vue'), name: 'klineAnalysis' },
   { path: '/ai-configs', component: () => import('../components/ai-config-manager.vue'), name: 'aiConfigs' },
-  { path: '/user-profile', component: () => import('../components/user-profile.vue'), name: 'userProfile' }
+  { path: '/user-profile', component: () => import('../components/user-profile.vue'), name: 'userProfile' },
+  { path: '/daily-review', component: () => import('../components/DailyReview.vue'), name: 'dailyReview' },
+  { path: '/morning-strategy', component: () => import('../components/MorningStrategy.vue'), name: 'morningStrategy' }
 ]
 
 const router = createRouter({

@@ -256,6 +256,8 @@ func (a *CronTaskApi) GetTaskTypes() []lo.Tuple2[string, string] {
 		{A: "stock_change_save", B: "异动数据保存"},
 		{A: CronTaskTypeStrategyScreening, B: "策略选股推送"},
 		{A: CronTaskTypeMottoPush, B: "推送格言"},
+		{A: "daily_review", B: "每日复盘"},
+		{A: "morning_strategy", B: "盘前策略"},
 	}
 }
 
@@ -359,6 +361,10 @@ func (a *CronTaskApi) executeTaskByType(ctx context.Context, task *models.CronTa
 		return a.executeStockMonitor(ctx, task)
 	case "stock_change_save":
 		return a.executeStockChangeSave(ctx, task)
+	case "daily_review":
+		return a.executeDailyReview(ctx, task)
+	case "morning_strategy":
+		return a.executeMorningStrategy(ctx, task)
 	case "custom":
 		return a.executeCustomTask(ctx, task)
 	case CronTaskTypeStrategyScreening:
@@ -526,6 +532,53 @@ func (a *CronTaskApi) executeMarketAnalysis(ctx context.Context, task *models.Cr
 	// reasoning 只沿用历史持久化语义，任务完成通知仅发送模型的最终回答。
 	finalAnalysis := strings.TrimSpace(notificationContent.String())
 	return cronTaskContent{Summary: "市场分析完成", Markdown: finalAnalysis, PlainText: finalAnalysis}, nil
+}
+
+// 报告任务复用统一执行结果，运行信息持久化后再由 App 完成通知开关决定推送。
+// reportTaskParams 每日复盘/盘前策略任务共用参数
+type reportTaskParams struct {
+	AiConfigId  int    `json:"aiConfigId"`
+	SysPromptId int    `json:"sysPromptId"`
+	Thinking    bool   `json:"thinking"`
+	AgentMode   string `json:"agentMode"`
+}
+
+func (a *CronTaskApi) executeDailyReview(ctx context.Context, task *models.CronTask) (cronTaskContent, error) {
+	logger.SugaredLogger.Infof("执行每日复盘任务：%s", task.Name)
+	var params reportTaskParams
+	if task.Params != "" {
+		if err := json.Unmarshal([]byte(task.Params), &params); err != nil {
+			logger.SugaredLogger.Errorf("解析任务参数失败：%v", err)
+			return cronTaskContent{}, err
+		}
+	}
+	review, err := NewDailyReviewApi().GenerateDailyReview(ctx, "", FirstAiConfigId(params.AiConfigId), params.SysPromptId, params.Thinking, params.AgentMode, "cron")
+	if err != nil {
+		return cronTaskContent{}, err
+	}
+	if review == nil {
+		return cronTaskContent{Summary: "非交易日，跳过每日复盘"}, nil
+	}
+	return cronTaskContent{Summary: "每日复盘 " + review.ReviewDate, Markdown: review.Content, PlainText: review.Content}, nil
+}
+
+func (a *CronTaskApi) executeMorningStrategy(ctx context.Context, task *models.CronTask) (cronTaskContent, error) {
+	logger.SugaredLogger.Infof("执行盘前策略任务：%s", task.Name)
+	var params reportTaskParams
+	if task.Params != "" {
+		if err := json.Unmarshal([]byte(task.Params), &params); err != nil {
+			logger.SugaredLogger.Errorf("解析任务参数失败：%v", err)
+			return cronTaskContent{}, err
+		}
+	}
+	strategy, err := NewMorningStrategyApi().GenerateMorningStrategy(ctx, "", FirstAiConfigId(params.AiConfigId), params.SysPromptId, params.Thinking, params.AgentMode, "cron")
+	if err != nil {
+		return cronTaskContent{}, err
+	}
+	if strategy == nil {
+		return cronTaskContent{Summary: "无前一交易日数据，跳过盘前策略"}, nil
+	}
+	return cronTaskContent{Summary: "盘前策略 " + strategy.StrategyDate, Markdown: strategy.Content, PlainText: strategy.Content}, nil
 }
 
 func (a *CronTaskApi) executeGlobalStockIndexCache(ctx context.Context, task *models.CronTask) (cronTaskContent, error) {

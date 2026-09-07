@@ -1502,6 +1502,74 @@ export namespace data {
 		    return a;
 		}
 	}
+	export class ExportTableColumn {
+	    title: string;
+	    key: string;
+	    children?: ExportTableColumn[];
+
+	    static createFrom(source: any = {}) {
+	        return new ExportTableColumn(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.title = source["title"];
+	        this.key = source["key"];
+	        this.children = this.convertValues(source["children"], ExportTableColumn);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class ExportTableData {
+	    sheetName: string;
+	    columns: ExportTableColumn[];
+	    rows: any[];
+
+	    static createFrom(source: any = {}) {
+	        return new ExportTableData(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.sheetName = source["sheetName"];
+	        this.columns = this.convertValues(source["columns"], ExportTableColumn);
+	        this.rows = source["rows"];
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class FundBasic {
 	    ID: number;
 	    // Go type: time
@@ -3561,6 +3629,7 @@ export namespace main {
 	    name: string;
 	    description: string;
 	    dirName: string;
+	    disabled: boolean;
 
 	    static createFrom(source: any = {}) {
 	        return new FilesystemSkillInfo(source);
@@ -3571,6 +3640,7 @@ export namespace main {
 	        this.name = source["name"];
 	        this.description = source["description"];
 	        this.dirName = source["dirName"];
+	        this.disabled = source["disabled"];
 	    }
 	}
 	export class SkillFileInfo {
@@ -4217,6 +4287,44 @@ export namespace models {
 	        this.aiConfigId = source["aiConfigId"];
 	    }
 	}
+	export class BKConstituentStock {
+	    code: string;
+	    name: string;
+	    price: number;
+	    changePercent: number;
+	    change: number;
+	    volume: number;
+	    dealAmount: number;
+	    turnoverRate: number;
+	    volumeRatio: number;
+	    flowMarketCap: number;
+	    totalMarketCap: number;
+	    peRatio: number;
+	    mainNetInflow: number;
+	    mainNetInflowPct: number;
+
+	    static createFrom(source: any = {}) {
+	        return new BKConstituentStock(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.code = source["code"];
+	        this.name = source["name"];
+	        this.price = source["price"];
+	        this.changePercent = source["changePercent"];
+	        this.change = source["change"];
+	        this.volume = source["volume"];
+	        this.dealAmount = source["dealAmount"];
+	        this.turnoverRate = source["turnoverRate"];
+	        this.volumeRatio = source["volumeRatio"];
+	        this.flowMarketCap = source["flowMarketCap"];
+	        this.totalMarketCap = source["totalMarketCap"];
+	        this.peRatio = source["peRatio"];
+	        this.mainNetInflow = source["mainNetInflow"];
+	        this.mainNetInflowPct = source["mainNetInflowPct"];
+	    }
+	}
 	export class BKFundFlow {
 	    id: number;
 	    code: string;
@@ -4836,6 +4944,101 @@ export namespace models {
 	        this.status = source["status"];
 	    }
 	}
+	export class DailyReview {
+	    id: number;
+	    // Go type: time
+	    createdAt: any;
+	    // Go type: time
+	    updatedAt: any;
+	    reviewDate: string;
+	    status: string;
+	    summary: string;
+	    content: string;
+	    aiConfigId: number;
+	    sysPromptId: number;
+	    triggerType: string;
+	    errorMessage: string;
+	    // Go type: time
+	    generatedAt?: any;
+	    durationMs: number;
+
+	    static createFrom(source: any = {}) {
+	        return new DailyReview(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.createdAt = this.convertValues(source["createdAt"], null);
+	        this.updatedAt = this.convertValues(source["updatedAt"], null);
+	        this.reviewDate = source["reviewDate"];
+	        this.status = source["status"];
+	        this.summary = source["summary"];
+	        this.content = source["content"];
+	        this.aiConfigId = source["aiConfigId"];
+	        this.sysPromptId = source["sysPromptId"];
+	        this.triggerType = source["triggerType"];
+	        this.errorMessage = source["errorMessage"];
+	        this.generatedAt = this.convertValues(source["generatedAt"], null);
+	        this.durationMs = source["durationMs"];
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class DailyReviewPageData {
+	    list: DailyReview[];
+	    total: number;
+	    page: number;
+	    pageSize: number;
+	    totalPages: number;
+
+	    static createFrom(source: any = {}) {
+	        return new DailyReviewPageData(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.list = this.convertValues(source["list"], DailyReview);
+	        this.total = source["total"];
+	        this.page = source["page"];
+	        this.pageSize = source["pageSize"];
+	        this.totalPages = source["totalPages"];
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class LhbInstitutionStockAction {
 	    stockCode: string;
 	    stockName: string;
@@ -5244,6 +5447,101 @@ export namespace models {
 	        this.szUpCount = source["szUpCount"];
 	        this.szDownCount = source["szDownCount"];
 	        this.createdAt = this.convertValues(source["createdAt"], null);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class MorningStrategy {
+	    id: number;
+	    // Go type: time
+	    createdAt: any;
+	    // Go type: time
+	    updatedAt: any;
+	    strategyDate: string;
+	    status: string;
+	    summary: string;
+	    content: string;
+	    aiConfigId: number;
+	    sysPromptId: number;
+	    triggerType: string;
+	    errorMessage: string;
+	    // Go type: time
+	    generatedAt?: any;
+	    durationMs: number;
+
+	    static createFrom(source: any = {}) {
+	        return new MorningStrategy(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.createdAt = this.convertValues(source["createdAt"], null);
+	        this.updatedAt = this.convertValues(source["updatedAt"], null);
+	        this.strategyDate = source["strategyDate"];
+	        this.status = source["status"];
+	        this.summary = source["summary"];
+	        this.content = source["content"];
+	        this.aiConfigId = source["aiConfigId"];
+	        this.sysPromptId = source["sysPromptId"];
+	        this.triggerType = source["triggerType"];
+	        this.errorMessage = source["errorMessage"];
+	        this.generatedAt = this.convertValues(source["generatedAt"], null);
+	        this.durationMs = source["durationMs"];
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class MorningStrategyPageData {
+	    list: MorningStrategy[];
+	    total: number;
+	    page: number;
+	    pageSize: number;
+	    totalPages: number;
+
+	    static createFrom(source: any = {}) {
+	        return new MorningStrategyPageData(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.list = this.convertValues(source["list"], MorningStrategy);
+	        this.total = source["total"];
+	        this.page = source["page"];
+	        this.pageSize = source["pageSize"];
+	        this.totalPages = source["totalPages"];
 	    }
 
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

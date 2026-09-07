@@ -109,6 +109,8 @@ export function DeleteCustomStrategy(arg1:number):Promise<string>;
 
 export function DeleteDailyOperationPlan(arg1:number):Promise<string>;
 
+export function DeleteDailyReview(arg1:number):Promise<string>;
+
 export function DeleteFilesystemSkill(arg1:string):Promise<string>;
 
 export function DeleteKBDocument(arg1:string,arg2:string):Promise<void>;
@@ -118,6 +120,8 @@ export function DeleteKBGraph(arg1:string):Promise<void>;
 export function DeleteKnowledgeBase(arg1:string):Promise<void>;
 
 export function DeleteMCPServer(arg1:number):Promise<string>;
+
+export function DeleteMorningStrategy(arg1:number):Promise<string>;
 
 export function DeleteMotto(arg1:number):Promise<void>;
 
@@ -131,9 +135,13 @@ export function DeleteStockChangeHistory(arg1:number):Promise<string>;
 
 export function DeleteTradingRecord(arg1:number):Promise<void>;
 
+export function DisableFilesystemSkill(arg1:string):Promise<string>;
+
 export function EMDictCode(arg1:string):Promise<Array<any>>;
 
 export function EnableCronTask(arg1:number,arg2:boolean):Promise<string>;
+
+export function EnableFilesystemSkill(arg1:string):Promise<string>;
 
 export function EnableMCPServer(arg1:number,arg2:boolean):Promise<string>;
 
@@ -142,6 +150,8 @@ export function EnableSkill(arg1:number,arg2:boolean):Promise<string>;
 export function ExecuteCronTaskNow(arg1:number):Promise<string>;
 
 export function ExportConfig():Promise<string>;
+
+export function ExportTableToXLSX(arg1:string,arg2:data.ExportTableData):Promise<string>;
 
 export function ExportTradingRecordTemplate():Promise<string>;
 
@@ -156,6 +166,10 @@ export function FindConceptCodeByName(arg1:string):Promise<string>;
 export function Follow(arg1:string):Promise<string>;
 
 export function FollowFund(arg1:string):Promise<string>;
+
+export function GenerateDailyReviewNow(arg1:string,arg2:number,arg3:number,arg4:string):Promise<string>;
+
+export function GenerateMorningStrategyNow(arg1:string,arg2:number,arg3:number,arg4:string):Promise<string>;
 
 export function GenerateStrategyCondition(arg1:agent.StrategyConditionAIRequest):Promise<agent.StrategyConditionAIResult>;
 
@@ -182,6 +196,8 @@ export function GetAllConceptPlates():Promise<Array<data.ConceptPlate>>;
 export function GetAllConcepts():Promise<Array<string>>;
 
 export function GetAllCustomStrategies():Promise<any>;
+
+export function GetAllDeptPolicyNews(arg1:number):Promise<any>;
 
 export function GetAllGroupStocks():Promise<Array<data.GroupStock>>;
 
@@ -210,6 +226,8 @@ export function GetAllStocks(arg1:number,arg2:number,arg3:string,arg4:models.Tec
 export function GetAllTdxTransactionData(arg1:string):Promise<any>;
 
 export function GetAnnouncementAIAnalysis(arg1:string):Promise<models.AnnouncementAIAnalysis>;
+
+export function GetBKConstituentStocks(arg1:string):Promise<Array<models.BKConstituentStock>>;
 
 export function GetBKFundFlowList(arg1:string,arg2:number):Promise<Array<models.BKFundFlowPoint>>;
 
@@ -253,6 +271,10 @@ export function GetDailyOperationPlanByID(arg1:number):Promise<models.DailyOpera
 
 export function GetDailyOperationPlanList(arg1:models.DailyOperationPlanQuery):Promise<models.DailyOperationPlanPageData>;
 
+export function GetDailyReviewByDate(arg1:string):Promise<models.DailyReview>;
+
+export function GetDailyReviewList(arg1:number,arg2:number):Promise<models.DailyReviewPageData>;
+
 export function GetFeishuBotStatus():Promise<string>;
 
 export function GetFollowList(arg1:number):Promise<any>;
@@ -274,6 +296,8 @@ export function GetFuturesMemberRank(arg1:string,arg2:string):Promise<Array<data
 export function GetFuturesPositionTrend(arg1:string,arg2:string,arg3:number):Promise<data.FuturesPositionResp>;
 
 export function GetGlobalIndexTrend(arg1:string):Promise<data.GlobalIndexTrendResult>;
+
+export function GetGovDepartments():Promise<any>;
 
 export function GetGroupList():Promise<Array<data.Group>>;
 
@@ -301,9 +325,17 @@ export function GetKBGraphBuildStatus(arg1:string):Promise<agent.KBGraphBuildSta
 
 export function GetKBVectorizingStatus(arg1:string):Promise<agent.KBVectorizingStatus>;
 
+export function GetKeyDepartments():Promise<any>;
+
+export function GetKeyDeptPolicyNews(arg1:number):Promise<any>;
+
 export function GetKnowledgeBase(arg1:string):Promise<agent.KnowledgeBaseInfo>;
 
 export function GetKoreaDayKLine(arg1:string,arg2:number):Promise<any>;
+
+export function GetLatestDailyReview():Promise<models.DailyReview>;
+
+export function GetLatestMorningStrategy():Promise<models.MorningStrategy>;
 
 export function GetLatestTradingDay():Promise<string>;
 
@@ -329,7 +361,13 @@ export function GetMarketStatisticByDate(arg1:string):Promise<Array<models.Marke
 
 export function GetMoneyRankSina(arg1:string):Promise<Array<Record<string, any>>>;
 
+export function GetMorningStrategyByDate(arg1:string):Promise<models.MorningStrategy>;
+
+export function GetMorningStrategyList(arg1:number,arg2:number):Promise<models.MorningStrategyPageData>;
+
 export function GetMottos():Promise<Array<models.Motto>>;
+
+export function GetPolicyNews(arg1:string,arg2:number):Promise<any>;
 
 export function GetProfileLearnAiConfigId():Promise<number>;
 
@@ -372,6 +410,8 @@ export function GetStockMinutePriceLineData(arg1:string,arg2:string):Promise<Rec
 export function GetStockMoneyTrendByDay(arg1:string,arg2:number):Promise<Array<Record<string, any>>>;
 
 export function GetStockRealTimePrice(arg1:string):Promise<Record<string, any>>;
+
+export function GetStoredPolicyNews(arg1:string,arg2:string,arg3:number,arg4:number):Promise<any>;
 
 export function GetTdxCallAuction(arg1:string,arg2:number,arg3:number):Promise<any>;
 
@@ -545,6 +585,8 @@ export function SaveHotMoneySeats(arg1:data.HotMoneySeatFile):Promise<void>;
 
 export function SaveImage(arg1:string,arg2:string):Promise<string>;
 
+export function SaveKeyDepartments(arg1:Array<string>):Promise<string>;
+
 export function SaveStockChangesToHistory(arg1:Array<number>):Promise<string>;
 
 export function SaveUserProfile(arg1:string):Promise<void>;
@@ -632,6 +674,8 @@ export function UpdateCronTask(arg1:models.CronTask):Promise<string>;
 export function UpdateDailyOperationPlanAlert(arg1:number,arg2:boolean):Promise<string>;
 
 export function UpdateDailyOperationPlanStatus(arg1:number,arg2:string):Promise<string>;
+
+export function UpdateFilesystemSkillDescription(arg1:string,arg2:string):Promise<string>;
 
 export function UpdateGroup(arg1:number,arg2:string):Promise<string>;
 

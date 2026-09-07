@@ -512,7 +512,7 @@ function blinkBorder(findId) {
     />
   </n-modal>
 
-  <div style="position: fixed;bottom: 18px;right:5px;z-index: 10;width: 400px">
+  <div style="position: fixed;top: 28px;right:5px;z-index: 10;width: 400px">
     <n-input-group>
       <n-auto-complete
         v-model:value="data.name"

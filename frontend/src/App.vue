@@ -14,7 +14,7 @@ import {createDiscreteApi,darkTheme,lightTheme , NIcon, NText,NButton,NProgress,
 import {
   AlarmOutline,
   AnalyticsOutline,
-  BarChartSharp, Bonfire, BonfireOutline, BookOutline, CalendarOutline, DiamondOutline, EaselSharp,
+  BarChartSharp, Bonfire, BonfireOutline, BookOutline, CalendarOutline, DiamondOutline, DocumentTextOutline, EaselSharp,
   ExpandOutline, Flag,
   Flame, FlameSharp, FlaskOutline, GlobeOutline, HomeOutline, InformationOutline,
   LogoGithub,
@@ -268,6 +268,28 @@ const menuOptions = ref([
             ),
         key: 'market1',
         icon: renderIcon(NewspaperSharp),
+      },
+      {
+        label: () =>
+            h(
+                RouterLink,
+                {
+                  href: '#',
+                  to: {
+                    name: 'market',
+                    query: {
+                      name: "政策新闻",
+                    }
+                  },
+                  onClick: () => {
+                    activeKey.value = 'market'
+                    EventsEmit("changeMarketTab", {ID: 0, name: '政策新闻'})
+                  },
+                },
+                {default: () => '政策新闻',}
+            ),
+        key: 'market1_1',
+        icon: renderIcon(DocumentTextOutline),
       },
       {
         label: () =>
@@ -666,6 +688,62 @@ const menuOptions = ref([
             ),
         key: 'fundRanking',
         icon: renderIcon(TrendingUp),
+      },
+    ]
+  },
+  {
+    label: () =>
+        h(
+            RouterLink,
+            {
+              to: {
+                name: 'dailyReview',
+                params: {},
+              },
+              onClick: () => {
+                activeKey.value = 'dailyReview'
+              },
+            },
+            {default: () => '复盘策略'}
+        ),
+    key: 'reviewStrategy',
+    icon: renderIcon(CalendarOutline),
+    children: [
+      {
+        label: () =>
+            h(
+                RouterLink,
+                {
+                  to: {
+                    name: 'dailyReview',
+                    params: {},
+                  },
+                  onClick: () => {
+                    activeKey.value = 'dailyReview'
+                  },
+                },
+                {default: () => '每日复盘'}
+            ),
+        key: 'dailyReview',
+        icon: renderIcon(AnalyticsOutline),
+      },
+      {
+        label: () =>
+            h(
+                RouterLink,
+                {
+                  to: {
+                    name: 'morningStrategy',
+                    params: {},
+                  },
+                  onClick: () => {
+                    activeKey.value = 'morningStrategy'
+                  },
+                },
+                {default: () => '盘前策略'}
+            ),
+        key: 'morningStrategy',
+        icon: renderIcon(TimeOutline),
       },
     ]
   },
@@ -1303,6 +1381,8 @@ onBeforeUnmount(() => {
   EventsOff("loadingMsg")
   EventsOff("telegraph")
   EventsOff("newsPush")
+  EventsOff("dailyReviewGenerated")
+  EventsOff("morningStrategyGenerated")
   EventsOff("groupListChanged")
   EventsOff("updateDownloadStart")
   EventsOff("downloadProgress")
@@ -1418,6 +1498,44 @@ onMounted(() => {
             }}, { default: () => data.content }),
           meta: () => h(NText,{type:"warning"}, { default: () => data.source}),
           duration:1000*30 ,
+        })
+      }
+    })
+
+    EventsOn("dailyReviewGenerated", (data) => {
+      if (!data) return
+      if (data.status === 'failed') {
+        notification.create({
+          title: `每日复盘生成失败（${data.date}）`,
+          content: () => h('div', {style: {"text-align": "left", "font-size": "14px", "color": "#f67979"}},
+              {default: () => data.errorMessage || '未知错误'}),
+          duration: 1000 * 30,
+        })
+      } else if (data.status === 'success') {
+        notification.create({
+          title: `每日复盘已生成（${data.date}）`,
+          content: () => h('div', {style: {"text-align": "left", "font-size": "14px"}},
+              {default: () => data.summary || ''}),
+          duration: 1000 * 30,
+        })
+      }
+    })
+
+    EventsOn("morningStrategyGenerated", (data) => {
+      if (!data) return
+      if (data.status === 'failed') {
+        notification.create({
+          title: `盘前策略生成失败（${data.date}）`,
+          content: () => h('div', {style: {"text-align": "left", "font-size": "14px", "color": "#f67979"}},
+              {default: () => data.errorMessage || '未知错误'}),
+          duration: 1000 * 30,
+        })
+      } else if (data.status === 'success') {
+        notification.create({
+          title: `盘前策略已生成（${data.date}）`,
+          content: () => h('div', {style: {"text-align": "left", "font-size": "14px"}},
+              {default: () => data.summary || ''}),
+          duration: 1000 * 30,
         })
       }
     })

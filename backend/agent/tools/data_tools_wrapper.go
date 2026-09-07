@@ -2771,6 +2771,111 @@ func GetAllDataTools() []tool.BaseTool {
 	))
 
 	tools = append(tools, NewDataToolWrapper(
+		"GetPolicyNewsList",
+		"获取政府部门最新政策新闻列表（数据来自各部委官网，如发改委/央行/证监会/财政部等82个部门，按日期倒序去重）。支持按部门名称或关键词过滤（如 能源/数据/证监会），也可按关键词检索已入库的历史政策标题。分析政策利好利空、行业影响、政策动向时使用",
+		map[string]*schema.ParameterInfo{
+			"department": {
+				Type:     "string",
+				Desc:     "部门名称或关键词：支持部门全名（如 国家能源局）及名称关键词（如 能源 命中 国家能源局，数据 命中 国家数据局），为空则聚合全部部门",
+				Required: false,
+			},
+			"keyword": {
+				Type:     "string",
+				Desc:     "标题关键词，如 新能源/人工智能/房地产，非空时检索已入库历史政策",
+				Required: false,
+			},
+			"limit": {
+				Type:     "number",
+				Desc:     "返回条数，默认20，最大100",
+				Required: false,
+			},
+		},
+		func(args string) (string, error) {
+			department := gjson.Get(args, "department").String()
+			keyword := gjson.Get(args, "keyword").String()
+			limit := gjson.Get(args, "limit").Int()
+			return data.NewPolicyNewsApi().GetPolicyNewsToMarkdown(department, keyword, int(limit)), nil
+		},
+	))
+
+	tools = append(tools, NewDataToolWrapper(
+		"GetPolicyNewsDetail",
+		"获取某条政策新闻的详情全文内容（抓取政策原文页面并提取正文，含标题与原文链接）。输入政策新闻列表（GetPolicyNewsList）或政策文件库检索（SearchGovPolicyLibrary）中返回的链接，用于深入分析具体政策条款、实施时间、适用范围等",
+		map[string]*schema.ParameterInfo{
+			"url": {
+				Type:     "string",
+				Desc:     "政策详情页链接，即 GetPolicyNewsList/SearchGovPolicyLibrary 返回的链接字段（*.gov.cn 域名）",
+				Required: true,
+			},
+		},
+		func(args string) (string, error) {
+			rawurl := gjson.Get(args, "url").String()
+			if rawurl == "" {
+				return "参数 url 不能为空", nil
+			}
+			return data.NewPolicyNewsApi().GetPolicyNewsDetail(rawurl), nil
+		},
+	))
+
+	tools = append(tools, NewDataToolWrapper(
+		"SearchGovPolicyLibrary",
+		"检索国务院政策文件库（sousuo.www.gov.cn 官方权威库，含国务院文件/部门文件/国务院公报等数万份正式政策文件，可查文号、发文机关、发布日期）。支持按发文机关（部门名称或关键词，如 能源/数据局/证监会）过滤。查询国家层面的正式政策文件、红头文件、法律法规原文时优先使用此工具；部委官网的新闻动态用 GetPolicyNewsList",
+		map[string]*schema.ParameterInfo{
+			"keyword": {
+				Type:     "string",
+				Desc:     "检索关键词，如 人工智能/新能源/住房公积金/新质生产力，为空则按发布时间返回最新文件",
+				Required: false,
+			},
+			"department": {
+				Type:     "string",
+				Desc:     "发文机关：支持部门全名（如 商务部）及名称关键词（如 能源 命中 国家能源局，数据 命中 国家数据局）；含国务院时检索国务院本级文件（如 国务院办公厅）。为空则不过滤",
+				Required: false,
+			},
+			"searchField": {
+				Type:     "string",
+				Desc:     "检索字段：title=按标题（默认），content=按正文全文",
+				Required: false,
+			},
+			"category": {
+				Type:     "string",
+				Desc:     "文件类别：gongwen=国务院文件，bumenfile=部门文件，otherfile=其他文件（政策解读等），gongbao=国务院公报；为空合并全部类别",
+				Required: false,
+			},
+			"sortBy": {
+				Type:     "string",
+				Desc:     "排序方式：score=按相关度（默认），pubtime=按发布时间倒序",
+				Required: false,
+			},
+			"page": {
+				Type:     "number",
+				Desc:     "页码，默认 1，用于翻页获取更多结果",
+				Required: false,
+			},
+			"limit": {
+				Type:     "number",
+				Desc:     "每页条数，默认 20，最大 50",
+				Required: false,
+			},
+		},
+		func(args string) (string, error) {
+			keyword := gjson.Get(args, "keyword").String()
+			searchField := gjson.Get(args, "searchField").String()
+			department := gjson.Get(args, "department").String()
+			category := gjson.Get(args, "category").String()
+			sortBy := gjson.Get(args, "sortBy").String()
+			page := gjson.Get(args, "page").Int()
+			limit := gjson.Get(args, "limit").Int()
+			if page < 1 {
+				page = 1
+			}
+			if limit <= 0 {
+				limit = 20
+			}
+			return data.NewGovPolicyLibApi().SearchGovPolicyLibraryToMarkdown(keyword, searchField, department, category, sortBy, int(page), int(limit)), nil
+		},
+	))
+
+	tools = append(tools, NewDataToolWrapper(
 		"GetEconomicData",
 		"获取宏观经济数据，包括GDP、CPI、PPI、PMI等",
 		map[string]*schema.ParameterInfo{
@@ -6417,11 +6522,11 @@ func GetAllDataTools() []tool.BaseTool {
 	// ==================== 提示词模板管理（4 个工具） ====================
 	tools = append(tools, NewDataToolWrapper(
 		"ListPromptTemplates",
-		"查询提示词模板列表。可按名称和类型筛选，为空则返回全部。返回摘要列表（content 截断为 200 字预览）。当用户想查看已有提示词模板、查找某个模板时使用。",
+		"查询提示词模板列表。可按名称关键词模糊搜索（如传\"龙头\"可命中\"龙头战法复盘\"）、按类型筛选，为空则返回全部。返回摘要列表（content 截断为 200 字预览）。当用户想查看已有提示词模板、查找某个模板时使用。",
 		map[string]*schema.ParameterInfo{
 			"name": {
 				Type:     "string",
-				Desc:     "可选，按模板名称精确筛选",
+				Desc:     "可选，按模板名称关键词模糊筛选（支持部分匹配）",
 				Required: false,
 			},
 			"type": {

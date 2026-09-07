@@ -3879,7 +3879,7 @@ watch([tdxAmountFilter, filteredTdxTransactionList], () => {
     </n-tab-pane>
   </n-tabs>
 
-  <div style="position: fixed;bottom: 18px;right:5px;z-index: 10;width: 400px">
+  <div style="position: fixed;top: 58px;right:5px;z-index: 10;width: 400px">
     <!--    <n-card :bordered="false">-->
     <n-input-group>
       <!--        <n-button  type="error" @click="addBTN=!addBTN" > <n-icon :component="Search"/>&nbsp;<n-text  v-if="addBTN">隐藏</n-text></n-button>-->

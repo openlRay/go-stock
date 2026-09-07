@@ -354,6 +354,15 @@ type TelegraphTags struct {
 	TelegraphId uint `json:"telegraphId"`
 }
 
+// PolicyNews 政策新闻（各部委官网抓取，按 URL 唯一去重持久化）
+type PolicyNews struct {
+	gorm.Model
+	Title  string `json:"title" gorm:"index"`
+	Url    string `json:"url" gorm:"uniqueIndex"`
+	Date   string `json:"date" gorm:"index"`   // yyyy-MM-dd
+	Source string `json:"source" gorm:"index"` // 部门名
+}
+
 func (t TelegraphTags) TableName() string {
 	return "telegraph_tags"
 }
@@ -1868,6 +1877,24 @@ type ConceptFundFlowPoint struct {
 	NetInflow int64  `json:"netInflow"`
 }
 
+// BKConstituentStock 板块/概念成分股（东财实时行情，非入库模型）
+type BKConstituentStock struct {
+	Code             string  `json:"code"`             // 股票代码
+	Name             string  `json:"name"`             // 股票名称
+	Price            float64 `json:"price"`            // 最新价
+	ChangePercent    float64 `json:"changePercent"`    // 涨跌幅 %
+	Change           float64 `json:"change"`           // 涨跌额
+	Volume           float64 `json:"volume"`           // 成交量（手）
+	DealAmount       float64 `json:"dealAmount"`       // 成交额（元）
+	TurnoverRate     float64 `json:"turnoverRate"`     // 换手率 %
+	VolumeRatio      float64 `json:"volumeRatio"`      // 量比
+	FlowMarketCap    float64 `json:"flowMarketCap"`    // 流通市值（元）
+	TotalMarketCap   float64 `json:"totalMarketCap"`   // 总市值（元）
+	PERatio          float64 `json:"peRatio"`          // 市盈率（动态）
+	MainNetInflow    float64 `json:"mainNetInflow"`    // 主力净流入（元）
+	MainNetInflowPct float64 `json:"mainNetInflowPct"` // 主力净流入占比 %
+}
+
 // DailyOperationPlan 每日操作计划
 type DailyOperationPlan struct {
 	ID              uint      `json:"id" gorm:"primarykey"`
@@ -1936,6 +1963,64 @@ type DailyOperationPlanPageData struct {
 	Page       int                  `json:"page"`
 	PageSize   int                  `json:"pageSize"`
 	TotalPages int                  `json:"totalPages"`
+}
+
+// DailyReview 每日复盘报告（AI 收盘后生成）
+type DailyReview struct {
+	ID           uint       `json:"id" gorm:"primarykey"`
+	CreatedAt    time.Time  `json:"createdAt"`
+	UpdatedAt    time.Time  `json:"updatedAt"`
+	ReviewDate   string     `json:"reviewDate" gorm:"size:10;uniqueIndex"` // 报告日期 YYYY-MM-DD，一天一条（重新生成覆盖）
+	Status       string     `json:"status" gorm:"size:20;default:pending"` // pending/generating/success/failed
+	Summary      string     `json:"summary" gorm:"size:500"`               // 摘要（列表展示用）
+	Content      string     `json:"content" gorm:"type:text"`              // 复盘报告 Markdown 正文
+	AiConfigId   int        `json:"aiConfigId"`                            // 生成所用 AI 配置
+	SysPromptId  int        `json:"sysPromptId"`                           // 系统提示词 ID（0=内置默认）
+	TriggerType  string     `json:"triggerType" gorm:"size:20"`            // cron/manual
+	ErrorMessage string     `json:"errorMessage" gorm:"size:1000"`
+	GeneratedAt  *time.Time `json:"generatedAt"`
+	DurationMs   int64      `json:"durationMs"` // 生成耗时（毫秒）
+}
+
+func (DailyReview) TableName() string {
+	return "daily_reviews"
+}
+
+type DailyReviewPageData struct {
+	List       []DailyReview `json:"list"`
+	Total      int64         `json:"total"`
+	Page       int           `json:"page"`
+	PageSize   int           `json:"pageSize"`
+	TotalPages int           `json:"totalPages"`
+}
+
+// MorningStrategy 盘前策略（AI 盘前生成）
+type MorningStrategy struct {
+	ID           uint       `json:"id" gorm:"primarykey"`
+	CreatedAt    time.Time  `json:"createdAt"`
+	UpdatedAt    time.Time  `json:"updatedAt"`
+	StrategyDate string     `json:"strategyDate" gorm:"size:10;uniqueIndex"` // 策略日期 YYYY-MM-DD，一天一条（重新生成覆盖）
+	Status       string     `json:"status" gorm:"size:20;default:pending"`   // pending/generating/success/failed
+	Summary      string     `json:"summary" gorm:"size:500"`                 // 摘要（列表展示用）
+	Content      string     `json:"content" gorm:"type:text"`                // 策略 Markdown 正文
+	AiConfigId   int        `json:"aiConfigId"`                              // 生成所用 AI 配置
+	SysPromptId  int        `json:"sysPromptId"`                             // 系统提示词 ID（0=内置默认）
+	TriggerType  string     `json:"triggerType" gorm:"size:20"`              // cron/manual
+	ErrorMessage string     `json:"errorMessage" gorm:"size:1000"`
+	GeneratedAt  *time.Time `json:"generatedAt"`
+	DurationMs   int64      `json:"durationMs"` // 生成耗时（毫秒）
+}
+
+func (MorningStrategy) TableName() string {
+	return "morning_strategies"
+}
+
+type MorningStrategyPageData struct {
+	List       []MorningStrategy `json:"list"`
+	Total      int64             `json:"total"`
+	Page       int              `json:"page"`
+	PageSize   int              `json:"pageSize"`
+	TotalPages int              `json:"totalPages"`
 }
 
 // ConceptDetailInfo 同花顺概念详情页解析结果
