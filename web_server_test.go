@@ -16,6 +16,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -25,6 +26,7 @@ import (
 	"testing/fstest"
 	"time"
 
+	"github.com/xuri/excelize/v2"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
 )
@@ -145,7 +147,7 @@ func TestLoadWebBindingMethods(t *testing.T) {
 		}
 	}
 	for _, name := range []string{
-		"ExportTradingRecordTemplate", "ImportTradingRecordsFromExcel", "PickKBFilePath", "PickKBFilePaths",
+		"ExportTableToXLSX", "ExportTradingRecordTemplate", "ImportTradingRecordsFromExcel", "PickKBFilePath", "PickKBFilePaths",
 		"UploadKBFile", "UploadKBFiles",
 	} {
 		if _, ok := methods[name]; ok {
@@ -162,18 +164,22 @@ func TestWebTradingRecordTemplate(t *testing.T) {
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("status = %d", recorder.Code)
 	}
-	if got := recorder.Header().Get("Content-Type"); got != "text/plain; charset=utf-8" {
+	if got := recorder.Header().Get("Content-Type"); got != webXLSXMediaType {
 		t.Fatalf("Content-Type = %q", got)
 	}
 	if got := recorder.Header().Get("Content-Disposition"); !strings.Contains(got, "attachment") {
 		t.Fatalf("Content-Disposition = %q", got)
 	}
-	if got := recorder.Header().Get("X-Download-Filename"); got != data.TradingRecordTemplateFilename {
+	if got := recorder.Header().Get("X-Download-Filename"); got != url.PathEscape(data.TradingRecordTemplateFilename) {
 		t.Fatalf("X-Download-Filename = %q", got)
 	}
-	want := (data.StockDataApi{}).TradingRecordTemplateContent()
-	if got := recorder.Body.String(); got != want {
-		t.Fatalf("template body = %q, want %q", got, want)
+	workbook, err := excelize.OpenReader(bytes.NewReader(recorder.Body.Bytes()))
+	if err != nil {
+		t.Fatalf("template is not a valid XLSX workbook: %v", err)
+	}
+	defer workbook.Close()
+	if value, err := workbook.GetCellValue("交易记录", "A1"); err != nil || value != "成交日期" {
+		t.Fatalf("template header = %q, err = %v", value, err)
 	}
 
 	recorder = httptest.NewRecorder()
@@ -188,7 +194,7 @@ func TestWebBridgeProvidesTradingRecordTemplateDownload(t *testing.T) {
 		"async ExportTradingRecordTemplate()",
 		"fetch('/api/trading-records/template')",
 		"response.headers.get('X-Download-Filename')",
-		"downloadBlob(filename",
+		"downloadBlob(decodeURIComponent(filename)",
 	} {
 		if !strings.Contains(webBridgeSource, snippet) {
 			t.Fatalf("web-bridge 缺少交易记录模板下载实现: %s", snippet)

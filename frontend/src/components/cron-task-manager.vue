@@ -332,7 +332,7 @@
                   <n-form-item label-width="90px" label="AI 配置:">
                     <n-select
                       v-model:value="reviewParamsData.aiConfigId"
-                      :options="aiConfigOptions"
+                      :options="[{label: '默认模型', value: 0}, ...aiConfigOptions]"
                       placeholder="请选择 AI 配置"
                       filterable
                       style="width: 100%"
@@ -343,7 +343,7 @@
                   <n-form-item label-width="90px" label="系统提示词:">
                     <n-select
                       v-model:value="reviewParamsData.sysPromptId"
-                      :options="sysPromptOptions"
+                      :options="[{label: '内置提示词', value: 0}, ...sysPromptOptions]"
                       placeholder="请选择系统提示词（可选）"
                       filterable
                       clearable

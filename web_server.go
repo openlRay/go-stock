@@ -35,6 +35,7 @@ var webBindingSource embed.FS
 var webDesktopOnlyMethods = map[string]struct{}{
 	"CheckUpdate":                   {},
 	"ExportConfig":                  {},
+	"ExportTableToXLSX":             {},
 	"ExportTradingRecordTemplate":   {},
 	"ImportSkillPackage":            {},
 	"ImportTradingRecordsFromExcel": {},
@@ -195,6 +196,7 @@ func newWebHTTPServer(addr string, app *App, hub *webEventHub) (*http.Server, er
 	mux.HandleFunc("/api/events", api.events)
 	mux.HandleFunc("/api/skills/import", api.importSkill)
 	mux.HandleFunc("/api/trading-records/template", api.tradingRecordTemplate)
+	mux.HandleFunc("/api/tables/export", api.exportTable)
 	mux.HandleFunc("/api/trading-records/import", api.importTradingRecordFile)
 	mux.HandleFunc("/api/knowledge-base/file/import", api.importKBFile)
 	mux.HandleFunc("/api/knowledge-base/files/import", api.importKBFiles)
@@ -301,11 +303,12 @@ func (a *webAPI) tradingRecordTemplate(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		return
 	}
-	filename := data.TradingRecordTemplateFilename
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": filename}))
-	w.Header().Set("X-Download-Filename", filename)
-	_, _ = w.Write([]byte((data.StockDataApi{}).TradingRecordTemplateContent()))
+	content, err := (data.StockDataApi{}).TradingRecordTemplateXLSX()
+	if err != nil {
+		writeWebJSON(w, http.StatusInternalServerError, webRPCResponse{Error: "生成交易记录模板失败"})
+		return
+	}
+	writeWebXLSX(w, data.TradingRecordTemplateFilename, content)
 }
 
 func (a *webAPI) importKBFile(w http.ResponseWriter, r *http.Request) {

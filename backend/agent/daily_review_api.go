@@ -6,8 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/wailsapp/wails/v2/pkg/runtime"
-
 	"go-stock/backend/data"
 	"go-stock/backend/db"
 	"go-stock/backend/logger"
@@ -44,8 +42,9 @@ const dailyReviewDefaultSysPrompt = `你是一位拥有20年A股实战经验的�
 
 // GenerateDailyReview 生成每日复盘报告（全流程编排，同步执行，调用方自行决定是否放协程）
 func (a *DailyReviewApi) GenerateDailyReview(ctx context.Context, date string, aiConfigId, sysPromptId int, thinking bool, agentMode, triggerType string) (*models.DailyReview, error) {
-	if date == "" {
-		date = time.Now().Format("2006-01-02")
+	date, dateErr := NormalizeReportDate(date)
+	if dateErr != nil {
+		return nil, dateErr
 	}
 	logger.SugaredLogger.Infof("开始生成每日复盘报告：%s（trigger=%s, aiConfigId=%d, sysPromptId=%d, agentMode=%s）", date, triggerType, aiConfigId, sysPromptId, agentMode)
 
@@ -112,7 +111,9 @@ func (a *DailyReviewApi) GenerateDailyReview(ctx context.Context, date string, a
 		review.Status = "failed"
 		review.ErrorMessage = "AI 返回内容为空"
 		review.DurationMs = time.Since(start).Milliseconds()
-		db.Dao.Save(&review)
+		if err := db.Dao.Save(&review).Error; err != nil {
+			return nil, fmt.Errorf("保存报告失败状态失败: %w", err)
+		}
 		a.emitEvent(ctx, date, review)
 		return nil, fmt.Errorf("复盘报告生成失败：AI 返回内容为空")
 	}
@@ -303,12 +304,7 @@ func (a *DailyReviewApi) GetLatestDailyReview() *models.DailyReview {
 
 // GetDailyReviewList 分页查询历史复盘报告（列表不带全文）
 func (a *DailyReviewApi) GetDailyReviewList(page, pageSize int) *models.DailyReviewPageData {
-	if page < 1 {
-		page = 1
-	}
-	if pageSize < 1 {
-		pageSize = 10
-	}
+	page, pageSize = reportPagination(page, pageSize)
 	var total int64
 	db.Dao.Model(&models.DailyReview{}).Count(&total)
 	var list []models.DailyReview
@@ -330,19 +326,9 @@ func (a *DailyReviewApi) DeleteDailyReview(id uint) error {
 
 // ---------------- 通用辅助（复盘/盘前策略共用） ----------------
 
-// safeEventsEmit 安全推送 Wails 事件：ctx 非法或未初始化时静默跳过（测试环境等场景）
+// safeEventsEmit 复用共享事件通道，保证 Desktop/Wails 与 Web/SSE 使用相同数据和顺序。
 func safeEventsEmit(ctx context.Context, event string, payload any) {
-	if ctx == nil {
-		return
-	}
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				logger.SugaredLogger.Warnf("emit event %s panic recovered: %v", event, r)
-			}
-		}()
-		runtime.EventsEmit(ctx, event, payload)
-	}()
+	data.EmitAppEvent(event, payload)
 }
 
 // progressEmitter 流式进度事件发射器（复盘/盘前策略共用）：
@@ -423,14 +409,11 @@ func prevTradeDate(date string) string {
 	}
 }
 
-// FirstAiConfigId aiConfigId 为 0 时回退到第一个 AI 配置（保证默认任务开箱即用）
+// FirstAiConfigId 保持上游调用签名，模型选择遵循本地“显式选择、默认对话模型”的统一契约。
 func FirstAiConfigId(aiConfigId int) int {
-	if aiConfigId > 0 {
-		return aiConfigId
-	}
-	config := data.GetSettingConfig()
-	if len(config.AiConfigs) > 0 {
-		return int(config.AiConfigs[0].ID)
+	config, ok := data.GetSettingConfig().ResolveAIConfig(aiConfigId)
+	if ok {
+		return int(config.ID)
 	}
 	return 0
 }

@@ -72,3 +72,10 @@ func TestBuildSelfEvolutionPromptWithSeed(t *testing.T) {
 		t.Fatalf("期望 SOUL.md 已自动落盘: %v", err)
 	}
 }
+
+func TestSoulSeedAvailableWithoutWritableRoot(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "missing-parent", "read-only-app")
+	if prompt := buildSelfEvolutionPrompt(dir, ""); !strings.Contains(prompt, "P0") {
+		t.Fatal("无法落盘时仍应提供内置规则")
+	}
+}

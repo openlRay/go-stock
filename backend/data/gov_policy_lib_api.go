@@ -100,7 +100,7 @@ func (g GovPolicyLibApi) loadGovPolicyDeptNames() []string {
 	params.Set("sortType", "1")
 	params.Set("p", "1")
 	params.Set("n", "1")
-	resp, err := SharedHTTPClient.SetTimeout(15*time.Second).R().
+	resp, err := newPolicyHTTPClient().R().
 		SetHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0").
 		SetHeader("Referer", "https://sousuo.www.gov.cn/zcwjk/policyDocumentLibrary").
 		SetQueryParamsFromValues(params).
@@ -171,6 +171,12 @@ func cleanGovPolicyTitle(s string) string {
 //   - page：页码（1 起）
 //   - pageSize：每页条数（每类分别取，默认 20，最大 50）
 func (g GovPolicyLibApi) SearchGovPolicyLibrary(keyword, searchField, department, category, sortBy string, page, pageSize int) *[]GovPolicyDoc {
+	keyword, department = strings.TrimSpace(keyword), strings.TrimSpace(department)
+	if len(keyword) > 1000 || len(department) > 200 || page < 0 || page > 10000 || pageSize < 0 ||
+		(searchField != "" && searchField != "title" && searchField != "content") ||
+		(sortBy != "" && sortBy != "score" && sortBy != "pubtime") {
+		return &[]GovPolicyDoc{}
+	}
 	if page < 1 {
 		page = 1
 	}
@@ -186,7 +192,7 @@ func (g GovPolicyLibApi) SearchGovPolicyLibrary(keyword, searchField, department
 	if sortBy != "pubtime" {
 		sortBy = "score"
 	}
-	// 类别校验：非法值按全部处理
+	// 非法类别不回退全量查询，避免返回与工具参数含义不一致的内容。
 	if category != "" {
 		valid := false
 		for _, c := range govPolicyCategoryNames {
@@ -196,7 +202,7 @@ func (g GovPolicyLibApi) SearchGovPolicyLibrary(keyword, searchField, department
 			}
 		}
 		if !valid {
-			category = ""
+			return &[]GovPolicyDoc{}
 		}
 	}
 
@@ -208,7 +214,7 @@ func (g GovPolicyLibApi) SearchGovPolicyLibrary(keyword, searchField, department
 	params.Set("p", fmt.Sprintf("%d", page))
 	params.Set("n", fmt.Sprintf("%d", pageSize))
 
-	// 发文机关过滤（部委走 _bm+bmfl，国务院本级走 _gw+puborg；未命中则不加过滤）
+	// 发文机关过滤（部委走 _bm+bmfl，国务院本级走 _gw+puborg）。
 	if department != "" {
 		if strings.Contains(department, "国务院") {
 			// 国务院本级机关（国务院/国务院办公厅/国务院、中央军委 等），puborg 需精确名
@@ -220,7 +226,8 @@ func (g GovPolicyLibApi) SearchGovPolicyLibrary(keyword, searchField, department
 			params.Set("t", "zhengcelibrary_bm")
 			params.Set("bmfl", resolved)
 		} else {
-			logger.SugaredLogger.Warnf("政策文件库：部门[%s]未命中标准部门名单，忽略部门过滤", department)
+			logger.SugaredLogger.Warnf("政策文件库：部门[%s]未命中标准部门名单", department)
+			return &[]GovPolicyDoc{}
 		}
 	}
 	if params.Get("t") == "" {
@@ -228,7 +235,7 @@ func (g GovPolicyLibApi) SearchGovPolicyLibrary(keyword, searchField, department
 		params.Set("type", "gwyzcwjk")
 	}
 
-	resp, err := SharedHTTPClient.SetTimeout(15*time.Second).R().
+	resp, err := newPolicyHTTPClient().R().
 		SetHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0").
 		SetHeader("Referer", "https://sousuo.www.gov.cn/zcwjk/policyDocumentLibrary").
 		SetQueryParamsFromValues(params).

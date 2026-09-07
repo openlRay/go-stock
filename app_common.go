@@ -349,7 +349,8 @@ func (a *App) ChatWithAgent(question string, aiConfigId int, sysPromptId *int, m
 			effectiveSysPromptId = nil
 		}
 	}
-	ch := agent.NewStockAiAgentApi().ChatWithContext(ctx, question, aiConfigId, effectiveSysPromptId, memoryMode, memoryCount, thinkingMode, agentMode, skillPromptOverride, sessionId, skillQuestionBlock)
+	// optsOverride[2] 留给恢复会话，技能激活块必须放在 [3]，避免被当成恢复上下文。
+	ch := agent.NewStockAiAgentApi().ChatWithContext(ctx, question, aiConfigId, effectiveSysPromptId, memoryMode, memoryCount, thinkingMode, agentMode, skillPromptOverride, sessionId, "", skillQuestionBlock)
 	for msg := range ch {
 		a.emit("agent-message", agentMessageToFrontendMap(msg))
 	}

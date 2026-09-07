@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"go-stock/backend/logger"
 	"go-stock/backend/models"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -50,18 +52,32 @@ type bkConstituentsResponse struct {
 // bkConstituentsHosts 东财 clist 服务主机（push2 实时优先，部分网络环境下 EOF 时回退 push2delay）
 var bkConstituentsHosts = []string{"https://push2.eastmoney.com", "https://push2delay.eastmoney.com"}
 
+var bkConstituentCodePattern = regexp.MustCompile(`^BK[0-9]{4,6}$`)
+
 // fetchBKConstituentsPage 抓取一页成分股数据，主机列表按序回退
 func fetchBKConstituentsPage(bkCode string, page, pageSize int) (*bkConstituentsResponse, error) {
+	if !bkConstituentCodePattern.MatchString(bkCode) || page < 1 || page > 10000 || pageSize < 1 || pageSize > 100 {
+		return nil, fmt.Errorf("无效的板块代码或分页参数")
+	}
 	var lastErr error
 	for _, host := range bkConstituentsHosts {
-		url := fmt.Sprintf("%s/api/qt/clist/get?pn=%d&pz=%d&po=1&np=1&fltt=2&invt=2&fid=f62&fs=b:%s&fields=f12,f13,f14,f2,f3,f4,f5,f6,f8,f10,f20,f21,f23,f62,f184&_=_%d",
-			host, page, pageSize, bkCode, time.Now().UnixMilli())
-		resp, err := SharedHTTPClient.SetTimeout(15*time.Second).R().
+		resp, err := CreateHTTPClientWithTimeout(15*time.Second).R().
+			SetQueryParams(map[string]string{
+				"pn": strconv.Itoa(page), "pz": strconv.Itoa(pageSize), "po": "1", "np": "1",
+				"fltt": "2", "invt": "2", "fid": "f62", "fs": "b:" + bkCode,
+				"fields": "f12,f13,f14,f2,f3,f4,f5,f6,f8,f10,f20,f21,f23,f62,f184",
+				"_":      strconv.FormatInt(time.Now().UnixMilli(), 10),
+			}).
+			SetResponseBodyLimit(8<<20).
 			SetHeader("Referer", "https://quote.eastmoney.com/center/boardlist.html").
 			SetHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36").
-			Get(url)
+			Get(host + "/api/qt/clist/get")
 		if err != nil {
 			lastErr = err
+			continue
+		}
+		if !resp.IsSuccess() {
+			lastErr = fmt.Errorf("板块行情 HTTP %d", resp.StatusCode())
 			continue
 		}
 		var result bkConstituentsResponse
@@ -78,8 +94,8 @@ func fetchBKConstituentsPage(bkCode string, page, pageSize int) (*bkConstituents
 // bkCode 为东财板块代码（如 BK0475），板块（行业）与概念代码通用
 // 默认按主力净流入降序；支持分页抓取全量（东财单页上限约 100 条）
 func (b *BKConstituentsApi) GetBKConstituentStocks(bkCode string) []models.BKConstituentStock {
-	bkCode = strings.TrimSpace(bkCode)
-	if bkCode == "" {
+	bkCode = strings.ToUpper(strings.TrimSpace(bkCode))
+	if !bkConstituentCodePattern.MatchString(bkCode) {
 		return []models.BKConstituentStock{}
 	}
 

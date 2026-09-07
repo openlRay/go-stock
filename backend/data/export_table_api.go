@@ -53,6 +53,25 @@ func (receiver StockDataApi) BuildTableXLSX(table ExportTableData) ([]byte, erro
 	if len(table.Rows) == 0 {
 		return nil, fmt.Errorf("导出失败：没有可导出的数据")
 	}
+	// 浏览器可以直接提交列树；限制层级和展开后的规模，避免递归或大表占满服务内存。
+	columnCount := 0
+	hasChildren := false
+	for _, column := range table.Columns {
+		if len(column.Children) == 0 {
+			columnCount++
+			continue
+		}
+		hasChildren = true
+		columnCount += len(column.Children)
+		for _, child := range column.Children {
+			if len(child.Children) != 0 {
+				return nil, fmt.Errorf("导出失败：最多支持二级表头")
+			}
+		}
+	}
+	if columnCount > 256 || len(table.Rows) > 10000 || columnCount*len(table.Rows) > 1000000 {
+		return nil, fmt.Errorf("导出失败：最多 256 列、10000 行和 1000000 个单元格")
+	}
 
 	sheet := table.SheetName
 	if sheet == "" {
@@ -66,7 +85,6 @@ func (receiver StockDataApi) BuildTableXLSX(table ExportTableData) ([]byte, erro
 	}
 
 	leaves := leafColumns(table.Columns)
-	hasChildren := len(leaves) != len(table.Columns)
 
 	// 表头样式：加粗 + 灰底 + 居中
 	headerStyle, err := f.NewStyle(&excelize.Style{

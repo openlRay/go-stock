@@ -247,7 +247,21 @@ function installAppProxy() {
       if (!response.ok) throw new Error('下载交易记录模板失败')
       const filename = response.headers.get('X-Download-Filename')
       if (!filename) throw new Error('交易记录模板响应缺少文件名')
-      return downloadBlob(filename, await response.blob())
+      return downloadBlob(decodeURIComponent(filename), await response.blob())
+    },
+    async ExportTableToXLSX(filename, table) {
+      const response = await fetch('/api/tables/export', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({filename, table}),
+      })
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}))
+        throw new Error(payload.error || '导出 Excel 失败')
+      }
+      const downloadName = response.headers.get('X-Download-Filename')
+      if (!downloadName) throw new Error('Excel 响应缺少文件名')
+      return downloadBlob(decodeURIComponent(downloadName), await response.blob())
     },
     async PickKBFilePath() {
       const file = await selectFile('.txt,.md,.markdown,text/plain,text/markdown')

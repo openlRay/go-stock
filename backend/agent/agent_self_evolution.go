@@ -63,7 +63,7 @@ var soulSeedContent string
 
 // seedSoulIfMissing 在 rootDir 下不存在 SOUL.md 时落盘内置种子。
 // 幂等：文件已存在（含用户清空的空文件）则不做任何事，绝不覆盖用户自定义内容。
-// 并发安全：多 goroutine 同时首次触发时重复写入相同内容，结果幂等无害。
+// 并发安全：独占创建文件，不覆盖其他请求或用户已经创建的内容。
 // 失败仅记日志，不阻断 buildSelfEvolutionPrompt 主流程。
 func seedSoulIfMissing(rootDir string) {
 	if rootDir == "" || rootDir == "." {
@@ -76,8 +76,18 @@ func seedSoulIfMissing(rootDir string) {
 		logger.SugaredLogger.Warnf("检查 SOUL.md 失败: %v (path=%s)", err, path)
 		return
 	}
-	if err := os.WriteFile(path, []byte(soulSeedContent), 0o644); err != nil {
-		logger.SugaredLogger.Warnf("落盘内置 SOUL.md 失败（自进化规则不注入）: %v (path=%s)", err, path)
+	// 独占创建，避免并发首次请求在检查后覆盖用户刚写入的自定义文件。
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if os.IsExist(err) {
+		return
+	}
+	if err != nil {
+		logger.SugaredLogger.Warnf("落盘内置 SOUL.md 失败（继续使用内置规则）: %v (path=%s)", err, path)
+		return
+	}
+	defer file.Close()
+	if _, err := file.WriteString(soulSeedContent); err != nil {
+		logger.SugaredLogger.Warnf("写入内置 SOUL.md 失败: %v", err)
 		return
 	}
 	logger.SugaredLogger.Infof("已落盘内置 SOUL.md 进化规则 (path=%s)", path)
@@ -159,7 +169,14 @@ func loadSoul(rootDir string) string {
 	if rootDir == "" {
 		return ""
 	}
-	content, _, _ := globalFileCache.readCachedFile(filepath.Join(rootDir, soulFileName))
+	filename := filepath.Join(rootDir, soulFileName)
+	content, _, _ := globalFileCache.readCachedFile(filename)
+	// Docker 的应用根目录可能只读；缺失文件时仍使用内置规则，已存在的空文件继续表示禁用。
+	if content == "" {
+		if _, err := os.Stat(filename); os.IsNotExist(err) {
+			return strings.TrimSpace(soulSeedContent)
+		}
+	}
 	return strings.TrimSpace(content)
 }
 

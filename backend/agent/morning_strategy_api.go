@@ -43,8 +43,9 @@ const morningStrategyDefaultSysPrompt = `你是一位拥有20年A股实战经验
 
 // GenerateMorningStrategy 生成盘前策略（全流程编排，同步执行，调用方自行决定是否放协程）
 func (a *MorningStrategyApi) GenerateMorningStrategy(ctx context.Context, date string, aiConfigId, sysPromptId int, thinking bool, agentMode, triggerType string) (*models.MorningStrategy, error) {
-	if date == "" {
-		date = time.Now().Format("2006-01-02")
+	date, dateErr := NormalizeReportDate(date)
+	if dateErr != nil {
+		return nil, dateErr
 	}
 	logger.SugaredLogger.Infof("开始生成盘前策略：%s（trigger=%s, aiConfigId=%d, sysPromptId=%d, agentMode=%s）", date, triggerType, aiConfigId, sysPromptId, agentMode)
 
@@ -111,7 +112,9 @@ func (a *MorningStrategyApi) GenerateMorningStrategy(ctx context.Context, date s
 		strategy.Status = "failed"
 		strategy.ErrorMessage = "AI 返回内容为空"
 		strategy.DurationMs = time.Since(start).Milliseconds()
-		db.Dao.Save(&strategy)
+		if err := db.Dao.Save(&strategy).Error; err != nil {
+			return nil, fmt.Errorf("保存报告失败状态失败: %w", err)
+		}
 		a.emitEvent(ctx, date, strategy)
 		return nil, fmt.Errorf("盘前策略生成失败：AI 返回内容为空")
 	}
@@ -276,12 +279,7 @@ func (a *MorningStrategyApi) GetLatestMorningStrategy() *models.MorningStrategy 
 
 // GetMorningStrategyList 分页查询历史盘前策略（列表不带全文）
 func (a *MorningStrategyApi) GetMorningStrategyList(page, pageSize int) *models.MorningStrategyPageData {
-	if page < 1 {
-		page = 1
-	}
-	if pageSize < 1 {
-		pageSize = 10
-	}
+	page, pageSize = reportPagination(page, pageSize)
 	var total int64
 	db.Dao.Model(&models.MorningStrategy{}).Count(&total)
 	var list []models.MorningStrategy

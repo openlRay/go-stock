@@ -20,6 +20,7 @@ import (
 	"go-stock/backend/db"
 	"go-stock/backend/logger"
 	"go-stock/backend/models"
+	"go-stock/backend/runtimepath"
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/go-resty/resty/v2"
@@ -115,6 +116,10 @@ var defaultKeyDepartments = []string{
 
 // keyDepartmentsFile 重点部门外置文件（用户自定义，可编辑）
 const keyDepartmentsFile = "data/key_departments.json"
+
+func keyDepartmentsPath() string {
+	return filepath.Join(runtimepath.RootDir(), keyDepartmentsFile)
+}
 
 // keyDepartmentFile 外置文件结构
 type keyDepartmentFile struct {
@@ -288,12 +293,12 @@ func (p PolicyNewsApi) SaveKeyDepartments(departments []string) string {
 	if len(cleaned) == 0 {
 		cleaned = append(cleaned, defaultKeyDepartments...)
 	}
-	if err := os.MkdirAll(filepath.Dir(keyDepartmentsFile), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(keyDepartmentsPath()), 0755); err != nil {
 		logger.SugaredLogger.Errorf("保存重点部门失败(创建目录):%v", err)
 		return "保存失败：" + err.Error()
 	}
 	b, _ := json.MarshalIndent(keyDepartmentFile{Departments: cleaned}, "", "    ")
-	if err := os.WriteFile(keyDepartmentsFile, b, 0644); err != nil {
+	if err := os.WriteFile(keyDepartmentsPath(), b, 0644); err != nil {
 		logger.SugaredLogger.Errorf("保存重点部门失败:%v", err)
 		return "保存失败：" + err.Error()
 	}
@@ -308,7 +313,7 @@ func (p PolicyNewsApi) SaveKeyDepartments(departments []string) string {
 // loadKeyDepartments 读取重点部门：优先外置 data/key_departments.json，
 // 文件不存在/为空/解析失败时回退默认列表（返回副本避免调用方污染默认值）。
 func loadKeyDepartments() []string {
-	if raw, err := os.ReadFile(keyDepartmentsFile); err == nil {
+	if raw, err := os.ReadFile(keyDepartmentsPath()); err == nil {
 		var f keyDepartmentFile
 		if json.Unmarshal(raw, &f) == nil && len(f.Departments) > 0 {
 			return f.Departments
@@ -512,7 +517,22 @@ var (
 
 // fetchGovPage 抓取页面并按 charset（GB2312/GBK/UTF-8）解码为 goquery 文档
 func fetchGovPage(rawurl string) (*goquery.Document, error) {
-	resp, err := SharedHTTPClient.SetTimeout(15*time.Second).R().
+	return fetchGovPageWithClient(rawurl, newPolicyHTTPClient())
+}
+
+func newPolicyHTTPClient() *resty.Client {
+	// 请求超时不能修改共享 client，否则全部门并发抓取会影响其他行情和模型请求。
+	return CreateHTTPClientWithTimeout(15 * time.Second).SetResponseBodyLimit(8 << 20).
+		OnAfterResponse(func(_ *resty.Client, response *resty.Response) error {
+			if !response.IsSuccess() {
+				return fmt.Errorf("政策接口 HTTP %d", response.StatusCode())
+			}
+			return nil
+		})
+}
+
+func fetchGovPageWithClient(rawurl string, client *resty.Client) (*goquery.Document, error) {
+	resp, err := client.R().
 		SetHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0").
 		SetHeader("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8").
 		SetHeader("Accept-Language", "zh-CN,zh;q=0.9").
@@ -873,7 +893,7 @@ type nfraResp struct {
 // itemId=914 为"新闻资讯"父栏目，返回各子栏目（时政要闻/监管动态/政策解读等）及各自最新文档。
 func fetchNfraPolicyNews(limit int) []PolicyNewsItem {
 	apiURL := "https://www.nfra.gov.cn/cbircweb/DocInfo/SelectItemAndDocByItemPId?itemId=914&pageSize=20"
-	resp, err := SharedHTTPClient.SetTimeout(15*time.Second).R().
+	resp, err := newPolicyHTTPClient().R().
 		SetHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0").
 		SetHeader("Referer", "https://www.nfra.gov.cn/cn/view/pages/xinwenzixun/xinwenzixun.html").
 		Get(apiURL)
@@ -938,7 +958,7 @@ func fetchCsrcPolicyNews(limit int) []PolicyNewsItem {
 	var items []PolicyNewsItem
 	for _, ch := range channels {
 		apiURL := fmt.Sprintf("https://www.csrc.gov.cn/searchList/%s?_isAgg=true&_isJson=true&_pageSize=%d&_template=index&_rangeTimeGte=&_channelName=&page=1", ch.id, limit)
-		resp, err := SharedHTTPClient.SetTimeout(15*time.Second).R().
+		resp, err := newPolicyHTTPClient().R().
 			SetHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0").
 			SetHeader("Referer", ch.referer).
 			Get(apiURL)
@@ -991,7 +1011,7 @@ var (
 // 每条记录形如 "aT":"标题","aPd":"2026-07-31 14:33","aU":"{\"common\":\"/jbkzzx/...html\"}"，
 // 按 aT 锚点切分记录后逐条提取。
 func fetchNdcpaPolicyNews(limit int) []PolicyNewsItem {
-	resp, err := SharedHTTPClient.SetTimeout(15*time.Second).R().
+	resp, err := newPolicyHTTPClient().R().
 		SetHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0").
 		Get("https://www.ndcpa.gov.cn/jbkzzx/c100014/common/list.html")
 	if err != nil {
@@ -1075,7 +1095,7 @@ func fetchNeaPolicyNews(limit int) []PolicyNewsItem {
 		if err != nil {
 			continue
 		}
-		resp, err := SharedHTTPClient.SetTimeout(15*time.Second).R().
+		resp, err := newPolicyHTTPClient().R().
 			SetHeader("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0").
 			SetHeader("Referer", ch.referer).
 			Get(ch.jsonURL)
@@ -1228,11 +1248,17 @@ func (p PolicyNewsApi) GetPolicyNewsDetail(rawurl string) string {
 	if rawurl == "" {
 		return "参数 url 不能为空"
 	}
-	u, err := url.Parse(rawurl)
-	if err != nil || u.Host == "" || !strings.Contains(u.Host, ".gov.cn") {
+	if !validPolicyDetailURL(rawurl) {
 		return "仅支持政府部门网站（*.gov.cn）的政策详情链接"
 	}
-	doc, err := fetchGovPage(rawurl)
+	// 首次链接和每次跳转都检查域名边界，不能让 gov.cn.example.com 或重定向绕过限制。
+	client := newPolicyHTTPClient().SetRedirectPolicy(resty.RedirectPolicyFunc(func(request *http.Request, via []*http.Request) error {
+		if len(via) >= 5 || !validPolicyDetailURL(request.URL.String()) {
+			return fmt.Errorf("政策详情跳转超出政府网站范围")
+		}
+		return nil
+	}))
+	doc, err := fetchGovPageWithClient(rawurl, client)
 	if err != nil {
 		return fmt.Sprintf("抓取政策详情失败：%v", err)
 	}
@@ -1284,6 +1310,16 @@ func (p PolicyNewsApi) GetPolicyNewsDetail(rawurl string) string {
 	sb.WriteString(fmt.Sprintf("- 原文链接：%s\n\n", rawurl))
 	sb.WriteString(content)
 	return sb.String()
+}
+
+func validPolicyDetailURL(rawurl string) bool {
+	u, err := url.Parse(rawurl)
+	if err != nil || u.User != nil || (u.Scheme != "http" && u.Scheme != "https") {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	return (host == "gov.cn" || strings.HasSuffix(host, ".gov.cn")) &&
+		(u.Port() == "" || u.Port() == "80" || u.Port() == "443")
 }
 
 // cleanPolicyContent 压缩连续空白并移除常见页脚/工具栏噪声行

@@ -4,7 +4,7 @@ import {
   NButton, NCard, NDataTable, NDatePicker, NEmpty,
   NSelect, NSpace, NSpin, NTag, NTooltip, useMessage
 } from 'naive-ui'
-import {EventsOff, EventsOn} from '../../wailsjs/runtime'
+import {EventsOn} from '../../wailsjs/runtime'
 import {
   DeleteDailyReview, GenerateDailyReviewNow, GetAiConfigs, GetConfig,
   GetDailyReviewByDate, GetDailyReviewList, GetPromptTemplates
@@ -243,8 +243,8 @@ async function loadAiConfigs() {
   try {
     const configs = await GetAiConfigs()
     aiConfigOptions.value = [
-      {label: '默认（第一个AI配置）', value: 0},
-      ...(configs || []).map(c => ({label: `${c.name}[${c.modelName}]`, value: c.ID}))
+      {label: '默认模型', value: 0},
+      ...(configs || []).filter(c => !c.modelType || c.modelType === 'chat').map(c => ({label: `${c.name}[${c.modelName}]`, value: c.ID}))
     ]
     // 恢复的选择已失效（配置被删除）时回退默认
     if (!aiConfigOptions.value.some(o => o.value === aiConfigId.value)) {
@@ -332,6 +332,9 @@ const columnsRef = [
   }
 ]
 
+// 只注销当前页面的监听，避免路由切换移除 App 全局完成通知。
+let stopGenerated
+let stopProgress
 onMounted(() => {
   GetConfig().then(result => {
     mdTheme.value = result && result.darkTheme ? 'dark' : 'light'
@@ -341,14 +344,14 @@ onMounted(() => {
   loadPromptTemplates()
   loadReport()
   loadHistory()
-  EventsOn("dailyReviewGenerated", onGenerated)
-  EventsOn("dailyReviewProgress", onProgress)
+  stopGenerated = EventsOn("dailyReviewGenerated", onGenerated)
+  stopProgress = EventsOn("dailyReviewProgress", onProgress)
 })
 
 onUnmounted(() => {
   stopPoll()
-  EventsOff("dailyReviewGenerated")
-  EventsOff("dailyReviewProgress")
+  stopGenerated?.()
+  stopProgress?.()
 })
 </script>
 

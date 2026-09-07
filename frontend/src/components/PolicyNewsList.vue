@@ -128,7 +128,7 @@
 </template>
 
 <script setup lang="ts">
-import {computed, onMounted, ref} from 'vue'
+import {computed, onMounted, onUnmounted, ref} from 'vue'
 import {
   GetAllDeptPolicyNews,
   GetGovDepartments,
@@ -382,11 +382,13 @@ function refresh() {
 }
 
 // 后台定时抓取完成后自动刷新（数据已入库，直接读库，非搜索模式）
-EventsOn("policyNewsUpdated", () => {
+const stopPolicyNewsUpdated = EventsOn("policyNewsUpdated", () => {
   if (!searchMode.value && !loading.value) {
     fetchNews()
   }
 })
+
+onUnmounted(stopPolicyNewsUpdated)
 
 onMounted(() => {
   GetGovDepartments().then(res => {
