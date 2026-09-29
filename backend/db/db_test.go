@@ -110,6 +110,30 @@ func TestConcurrentReadWrite(t *testing.T) {
 	}
 }
 
+// 带 mode/cache 的内存 DSN 仍须可连接，且新增 PRAGMA 必须生效。
+func TestSqliteDSNPreservesExistingQuery(t *testing.T) {
+	dsn := sqliteDSN("file:" + t.Name() + "?mode=memory&cache=shared")
+	database, err := gorm.Open(sqlite.New(sqlite.Config{DriverName: "sqlite", DSN: dsn}), &gorm.Config{})
+	if err != nil {
+		t.Fatalf("带查询参数的 DSN 无法连接: %v", err)
+	}
+	connection, err := database.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connection.Close()
+	var timeout int
+	if err := database.Raw("PRAGMA busy_timeout").Scan(&timeout).Error; err != nil || timeout != 10000 {
+		t.Fatalf("新增 PRAGMA 未生效: timeout=%d, error=%v", timeout, err)
+	}
+	if err := database.Exec("CREATE TABLE dsn_check (value INTEGER)").Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := database.Exec("INSERT INTO dsn_check VALUES (1)").Error; err != nil {
+		t.Fatal(err)
+	}
+}
+
 // 验证 DSN 拼装：裸路径追加并发 PRAGMA，已带参数的原样保留
 func TestSqliteDSN(t *testing.T) {
 	cases := []struct {

@@ -47,8 +47,10 @@ func TestDeepAgentVisionEndToEnd(t *testing.T) {
 	defer server.Close()
 
 	cfg := data.AIConfig{
+		Name:          "vision-e2e",
 		BaseUrl:       server.URL,
 		ModelName:     "test-vision",
+		MaxTokens:     1024,
 		ApiKey:        "test-key",
 		SupportVision: true,
 		TimeOut:       30,

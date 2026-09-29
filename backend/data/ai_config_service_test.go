@@ -96,6 +96,27 @@ func TestAIConfigCRUDRoundTrip(t *testing.T) {
 	}
 }
 
+func TestAIConfigVisionUpdateRoundTrip(t *testing.T) {
+	withAIConfigTestDB(t)
+	config, err := createAIConfig(validTestAIConfig("vision"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, enabled := range []bool{true, false} {
+		config.SupportVision = enabled
+		if _, err := updateAIConfig(config); err != nil {
+			t.Fatal(err)
+		}
+		var stored AIConfig
+		if err := db.Dao.First(&stored, config.ID).Error; err != nil {
+			t.Fatal(err)
+		}
+		if stored.SupportVision != enabled {
+			t.Fatalf("视觉开关未持久化: got %v, want %v", stored.SupportVision, enabled)
+		}
+	}
+}
+
 func TestEmbeddingAIConfigDoesNotParticipateInChatDefault(t *testing.T) {
 	withAIConfigTestDB(t)
 

@@ -1858,22 +1858,11 @@ func imageDataToBase64(img string, needMime bool) (mimeType, raw string, err err
 	if !strings.HasPrefix(img, "http://") && !strings.HasPrefix(img, "https://") {
 		return "", "", fmt.Errorf("不支持的图片格式（仅 http(s) 外链或 data URL）")
 	}
-	// 下载外链图片转 base64
-	resp, err := data.CreateHTTPClientWithTimeout(60 * time.Second).R().Get(img)
+	// Web 与桌面共用有界公网下载，避免 URL 输入绕过后端请求边界。
+	body, m, err := downloadVisionImage(img)
 	if err != nil {
-		return "", "", fmt.Errorf("下载图片失败: %w", err)
+		return "", "", err
 	}
-	if resp.IsError() {
-		return "", "", fmt.Errorf("下载图片失败: HTTP %d", resp.StatusCode())
-	}
-	body := resp.Body()
-	if len(body) == 0 {
-		return "", "", fmt.Errorf("下载图片为空")
-	}
-	if len(body) > maxVisionImageDownloadSize {
-		return "", "", fmt.Errorf("图片超过 10MB 限制")
-	}
-	m := resp.Header().Get("Content-Type")
 	if needMime {
 		if idx := strings.Index(m, ";"); idx > 0 {
 			m = m[:idx]

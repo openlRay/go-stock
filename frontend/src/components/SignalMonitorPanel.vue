@@ -18,7 +18,7 @@ import { alertSpeechAvailable, primeAlertSpeech, speakAlertText } from './kline/
 import { KLINE_MODAL_CONTENT_STYLE, KLINE_MODAL_STYLE, useKlineModalFit } from './kline/useKlineModalFit'
 import {
   SIGNAL_CHANNEL_OPTIONS, SIGNAL_FAMILY_OPTIONS, SIGNAL_INTERVAL_OPTIONS, SIGNAL_POOL_LIMIT, SIGNAL_PAGE_SIZE_OPTIONS,
-  SIGNAL_STATS_PRESETS, addPoolEntry, canUseSignalMonitor, clearPool, clearSignals, entryKlts, formatSignalTime,
+  SIGNAL_STATS_PRESETS, addPoolEntry, clearPool, clearSignals, entryKlts, formatSignalTime,
   loadSignalStats, persistMonitorSettings, querySignals, removePoolEntry, runSignalTick, setEntryKlts, setMonitorEnabled,
   setSignalFilter, setSignalPage, setStatsCustomRange, setStatsPreset, signalMonitorState, startSignalMonitor,
 } from './kline/signalMonitor'
@@ -145,25 +145,12 @@ function onStatsDateRange(range) {
   setStatsPreset(1)
 }
 
-/**
- * 打开/关闭面板。打开前实时校验 VIP（后端同步本地解密，微秒级，不影响打开速度），
- * 权限不足时提示并保持关闭，避免用户进了面板才发现用不了。
- */
-async function togglePanel() {
-  if (!visible.value && !(await ensureVip())) return
+// 本地功能对所有用户开放，开关状态直接沿用监控引擎。
+function togglePanel() {
   visible.value = !visible.value
 }
 
-/** VIP 门槛校验：权限不足时给出统一的引导提示 */
-async function ensureVip() {
-  if (await canUseSignalMonitor()) return true
-  message.warning('后台买卖点信号监控仅对 VIP2 及以上赞助用户开放，请前往关于页面查看赞助方式。')
-  return false
-}
-
-/** 总开关：开启前先校验权限，拒绝时不改状态（开关受控于 state.enabled，不会误亮） */
-async function onToggleMonitor(v) {
-  if (v && !(await ensureVip())) return
+function onToggleMonitor(v) {
   setMonitorEnabled(v)
 }
 
@@ -233,7 +220,6 @@ function closePanel() {
 }
 
 async function scanNow() {
-  if (!(await ensureVip())) return
   if (!state.pool.length) {
     message.warning('监控池为空，请先添加股票')
     return

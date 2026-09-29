@@ -3,8 +3,6 @@ package main
 import (
 	"strings"
 
-	"github.com/wailsapp/wails/v2/pkg/runtime"
-
 	"go-stock/backend/data"
 	"go-stock/backend/logger"
 	"go-stock/backend/models"
@@ -21,7 +19,7 @@ import (
 // 前端会在收到后自行判断交易时段、监控开关与监控池，Go 侧不做业务判断。
 // 刻意不导出（不暴露为前端绑定）：节拍只应由 cron 驱动。
 func (a *App) signalMonitorTick() {
-	go runtime.EventsEmit(a.ctx, "signalMonitorTick")
+	a.emit("signalMonitorTick")
 }
 
 // NotifySignal 信号提醒推送出口。
@@ -47,8 +45,11 @@ func (a *App) NotifySignal(title, content, plain string, channels []string) stri
 	toastText := orDefault(plain, title)
 
 	if send(NotifyChannelApp) {
-		go data.NewAlertWindowsApi("go-stock买卖点信号", title, toastText, "").SendNotification()
-		go runtime.EventsEmit(a.ctx, "newsPush", map[string]any{
+		// Web 通过 SSE 展示提醒，仅桌面调用系统通知。
+		if !a.webMode {
+			go data.NewAlertWindowsApi("go-stock买卖点信号", title, toastText, "").SendNotification()
+		}
+		a.emit("newsPush", map[string]any{
 			"time":    title,
 			"isRed":   true,
 			"source":  "go-stock",

@@ -16,7 +16,6 @@ import { reactive, watch } from 'vue'
 import { EventsOn } from '../../../wailsjs/runtime'
 import {
   ClearSignalRecords,
-  GetEffectiveSponsorVip,
   GetSignalRecordPage,
   GetSignalStats,
   GetStockKLineWithFallback,
@@ -448,32 +447,6 @@ export function setMonitorEnabled(v) {
   persistSettings()
 }
 
-// ===== 权限（VIP2 及以上）=====
-
-/** 使用门槛：信号监控只对 VIP2 及以上赞助用户开放 */
-export const SIGNAL_MONITOR_VIP_LEVEL = 2
-
-/**
- * 当前生效的 VIP 等级：仅在赞助有效期内为解密等级，否则为 0。
- * 刻意不做缓存 —— 后端每次同步本地解密并判断有效期（无网络 IO），
- * 缓存会在启动早期读到空值并把 0 固化，导致 VIP2 用户被误拦。
- */
-export async function currentVipLevel() {
-  try {
-    const res = await GetEffectiveSponsorVip()
-    const lvl = Number(res?.vipLevel ?? 0)
-    const active = res?.active !== false
-    return active && !Number.isNaN(lvl) ? lvl : 0
-  } catch {
-    return 0
-  }
-}
-
-/** 是否具备使用信号监控的权限 */
-export async function canUseSignalMonitor() {
-  return (await currentVipLevel()) >= SIGNAL_MONITOR_VIP_LEVEL
-}
-
 /** 供面板在任意设置变更后调用 */
 export function persistMonitorSettings() {
   persistSettings()
@@ -690,8 +663,6 @@ async function evaluateEntry(entry, klt) {
 export async function runSignalTick(reason = 'manual') {
   if (!signalMonitorState.enabled) return
   if (!signalMonitorState.pool.length) return
-  // 权限兜底：赞助到期后即使开关还亮着也不再扫描
-  if (!(await canUseSignalMonitor())) return
   if (running) return
   running = true
   signalMonitorState.running = true
@@ -902,16 +873,6 @@ let lastGoTickAt = 0
 export async function startSignalMonitor() {
   if (started) return
   started = true
-  // 权限不足时连监听都不注册：后台不做任何扫描，也不占取数配额
-  if (!(await canUseSignalMonitor())) {
-    started = false
-    if (signalMonitorState.enabled) {
-      // 赞助到期/未激活：把持久化里的开关一并关掉，避免面板显示「监控中」
-      signalMonitorState.enabled = false
-      persistSettings()
-    }
-    return
-  }
   loadSignals()
   loadSignalStats()
   EventsOn(TICK_EVENT, () => {

@@ -10,9 +10,50 @@ import (
 	"testing"
 	"time"
 
+	"go-stock/backend/data"
+
 	einoopenai "github.com/cloudwego/eino-ext/components/model/openai"
 	"github.com/cloudwego/eino/schema"
 )
+
+func TestDeepSeekVisionPreservesRequestParameters(t *testing.T) {
+	var payload map[string]any
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Hostname() != "api.deepseek.com" || r.Header.Get("X-Vision-Test") != "present" {
+			t.Error("视觉请求未保留目标地址或自定义 Header")
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Error(err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}]}`))
+	}))
+	defer proxy.Close()
+	config := data.AIConfig{
+		Name: "deepseek-vision", BaseUrl: "http://api.deepseek.com/v1", ModelName: "deepseek-chat", ApiKey: "test-key",
+		SupportVision: true, MaxTokens: 1024, TimeOut: 5, ReasoningMode: data.ReasoningModeOn,
+		HttpProxyEnabled: true, HttpProxy: proxy.URL, ExtraHeaders: `{"X-Vision-Test":"present"}`,
+	}
+	model, err := createChatModel(context.Background(), config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parts, err := buildVisionImageParts([]string{"data:image/png;base64,aGVsbG8="}, &config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := model.Generate(context.Background(), []*schema.Message{{Role: schema.User, UserInputMultiContent: parts}}); err != nil {
+		t.Fatal(err)
+	}
+	encoded, _ := json.Marshal(payload)
+	if !strings.Contains(string(encoded), `"image_url"`) || payload["max_tokens"] != float64(1024) {
+		t.Fatalf("视觉输入或输出上限丢失: %s", encoded)
+	}
+	thinking, ok := payload["thinking"].(map[string]any)
+	if !ok || thinking["type"] != "enabled" {
+		t.Fatalf("视觉请求丢失推理配置: %s", encoded)
+	}
+}
 
 // TestOpenAIComponentSendsImageURL 端到端验证：带 UserInputMultiContent 的消息经
 // eino OpenAI 兼容组件（DeepSeek vision 实际走的路径）发出的 HTTP 请求体中

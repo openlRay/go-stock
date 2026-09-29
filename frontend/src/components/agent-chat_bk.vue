@@ -177,7 +177,7 @@ const inputEnter = function (inputValue) {
   };
   chatList.value.unshift(params2);
   handleData(inputValue);
-  ChatWithAgent(inputValue,1,0)
+  ChatWithAgent(inputValue,1,0,false,0,false,'','','','')
 };
 
 

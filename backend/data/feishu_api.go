@@ -78,11 +78,15 @@ func postFeishuMessage(body, robot string) string {
 	}
 	result := resp.String()
 	logger.SugaredLogger.Infof("send feishu message: %s", result)
-	if feishuCode(result) == 0 || !strings.Contains(body, feishuAtAllMark) {
+	// json.Marshal 会转义尖括号，原始 JSON 与结构化卡片均须能移除 @所有人。
+	escapedMark, _ := json.Marshal(feishuAtAllMark)
+	retryBody := strings.ReplaceAll(body, feishuAtAllMark, "")
+	retryBody = strings.ReplaceAll(retryBody, string(escapedMark[1:len(escapedMark)-1]), "")
+	if feishuCode(result) == 0 || retryBody == body {
 		return parseFeishuResponse(result)
 	}
 	logger.SugaredLogger.Warnf("飞书消息发送失败，去掉@所有人重试: %s", result)
-	retryResp, retryErr := doPostFeishuMessage(strings.ReplaceAll(body, feishuAtAllMark, ""), robot)
+	retryResp, retryErr := doPostFeishuMessage(retryBody, robot)
 	if retryErr != nil {
 		logger.SugaredLogger.Error(retryErr.Error())
 		return "发送飞书消息失败：" + retryErr.Error()

@@ -43,6 +43,28 @@ func TestBKConstituentsRequestValidationAndQuery(t *testing.T) {
 	}
 }
 
+func TestBKConstituentsMarkdownSortingWithLocalServer(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"data":{"total":2,"diff":[{"f12":"000001","f14":"低涨幅","f3":1,"f184":4},{"f12":"000002","f14":"高涨幅","f3":3,"f184":2}]}}`)
+	}))
+	defer server.Close()
+	previous := bkConstituentsHosts
+	bkConstituentsHosts = []string{server.URL}
+	t.Cleanup(func() { bkConstituentsHosts = previous })
+	for _, tc := range []struct {
+		field, order, label string
+	}{
+		{"changePercent", "desc", "涨跌幅降序"},
+		{"mainNetInflowPct", "asc", "主力净流入占比升序"},
+	} {
+		markdown := GetBkConstituentStocksToMarkdown("BK0475", tc.field, tc.order, 1)
+		if !strings.Contains(markdown, tc.label) || !strings.Contains(markdown, "高涨幅") || strings.Contains(markdown, "低涨幅") {
+			t.Fatalf("排序或 TOP N 输出错误: %s", markdown)
+		}
+	}
+}
+
 func TestPolicyRequestsRejectInvalidInputBeforeNetwork(t *testing.T) {
 	requests := 0
 	previous := sharedTransport

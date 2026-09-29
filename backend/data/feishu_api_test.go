@@ -6,14 +6,64 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
 	"go-stock/backend/db"
 
+	"github.com/go-resty/resty/v2"
 	"github.com/tidwall/gjson"
 )
+
+func TestFeishuMentionFallbackPreservesSignature(t *testing.T) {
+	previous := SharedHTTPClient
+	SharedHTTPClient = resty.New()
+	t.Cleanup(func() { SharedHTTPClient = previous })
+	var requests []map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		var payload map[string]any
+		if err := json.Unmarshal(body, &payload); err != nil {
+			t.Error(err)
+		}
+		requests = append(requests, payload)
+		w.Header().Set("Content-Type", "application/json")
+		if len(requests) == 1 {
+			_, _ = w.Write([]byte(`{"code":19001,"msg":"no permission to mention all"}`))
+		} else {
+			_, _ = w.Write([]byte(`{"code":0,"msg":"success"}`))
+		}
+	}))
+	defer server.Close()
+	card := buildFeishuCardMessage("测试", "正文", FeishuCardOptions{MentionAll: true})
+	body, err := json.Marshal(card)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := NewFeishuAPI().SendFeishuMessageByRobot(string(body), server.URL, "test-secret")
+	if result != "发送飞书消息成功" || len(requests) != 2 {
+		t.Fatalf("重试结果 %q，请求数 %d", result, len(requests))
+	}
+	for i, payload := range requests {
+		timestamp, ok := payload["timestamp"].(string)
+		if !ok || payload["sign"] == "" {
+			t.Fatalf("第 %d 次请求丢失签名", i+1)
+		}
+		var seconds int64
+		if _, err := fmt.Sscan(timestamp, &seconds); err != nil || payload["sign"] != genFeishuSign("test-secret", seconds) {
+			t.Fatal("请求签名错误")
+		}
+		encoded, _ := json.Marshal(payload)
+		content := gjson.GetBytes(encoded, "card.body.elements.0.content").String()
+		if strings.Contains(content, feishuAtAllMark) != (i == 0) || !strings.Contains(content, "正文") {
+			t.Fatalf("第 %d 次请求内容错误: %q", i+1, content)
+		}
+	}
+}
 
 // @Author spark
 // @Date 2026/07/05

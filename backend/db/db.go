@@ -58,7 +58,12 @@ func sqliteDSN(path string) string {
 	if strings.Contains(path, "_pragma=") {
 		return path // 调用方已自带参数，尊重原样
 	}
-	return path + "?_pragma=busy_timeout(10000)" +
+	// file: 内存库等 DSN 已包含 mode/cache 参数，新增 PRAGMA 必须沿用原查询串。
+	separator := "?"
+	if strings.Contains(path, "?") {
+		separator = "&"
+	}
+	return path + separator + "_pragma=busy_timeout(10000)" +
 		"&_pragma=journal_mode(WAL)" +
 		"&_pragma=synchronous(NORMAL)" +
 		"&_pragma=cache_size(-131072)" + // 每连接页缓存上限 128MB（池扩容后按连接摊薄）
