@@ -2,6 +2,7 @@ package data
 
 import (
 	"encoding/json"
+	"fmt"
 	"go-stock/backend/db"
 	"go-stock/backend/logger"
 	"go-stock/backend/models"
@@ -110,8 +111,20 @@ func (b *BKFundFlowApi) GetBKFundFlowListByDate(code string, date string) []mode
 
 // GetBKFundFlowTopList 获取最新一次快照的板块资金排名（净流入前N名）
 func (b *BKFundFlowApi) GetBKFundFlowTopList(topN int) []models.BKFundFlow {
+	return b.GetBKFundFlowRankList(topN, "inflow")
+}
+
+// GetBKFundFlowRankList 获取最新一次快照的板块资金排名（非交易日自动回退到最近有数据的交易日）
+// direction: "inflow" 净流入降序（流入榜，仅净流入>0）；"outflow" 净流入升序（流出榜，仅净流入<0）
+func (b *BKFundFlowApi) GetBKFundFlowRankList(topN int, direction string) []models.BKFundFlow {
 	if topN <= 0 {
 		topN = 20
+	}
+	order := "net_inflow DESC"
+	cond := "net_inflow > 0"
+	if direction == "outflow" {
+		order = "net_inflow ASC"
+		cond = "net_inflow < 0"
 	}
 
 	// 先获取最新快照时间
@@ -124,23 +137,23 @@ func (b *BKFundFlowApi) GetBKFundFlowTopList(topN int) []models.BKFundFlow {
 	}
 
 	var list []models.BKFundFlow
-	err := db.Dao.Where("snap_time = ?", latestTime).
-		Order("net_inflow DESC").
+	err := db.Dao.Where("snap_time = ? AND "+cond, latestTime).
+		Order(order).
 		Limit(topN).
 		Find(&list).Error
 	if err != nil {
-		logger.SugaredLogger.Errorf("GetBKFundFlowTopList error: %v", err)
+		logger.SugaredLogger.Errorf("GetBKFundFlowRankList error: %v", err)
 		return []models.BKFundFlow{}
 	}
 	return list
 }
 
-// GetBKFundFlowTopListByDate 获取指定日期最新快照的板块资金排名
+// GetBKFundFlowTopListByDate 获取指定日期最新快照的板块资金排名（含净流入与净流出板块，按主力净流入降序）
+// 前端页面据此自行拆分流入榜/流出榜，故不能按方向过滤
 func (b *BKFundFlowApi) GetBKFundFlowTopListByDate(date string, topN int) []models.BKFundFlow {
 	if topN <= 0 {
 		topN = 20
 	}
-
 	// 获取指定日期的最新快照时间
 	var latestTime string
 	db.Dao.Model(&models.BKFundFlow{}).
@@ -158,6 +171,41 @@ func (b *BKFundFlowApi) GetBKFundFlowTopListByDate(date string, topN int) []mode
 		Find(&list).Error
 	if err != nil {
 		logger.SugaredLogger.Errorf("GetBKFundFlowTopListByDate error: %v", err)
+		return []models.BKFundFlow{}
+	}
+	return list
+}
+
+// GetBKFundFlowRankListByDate 获取指定日期最新快照的板块资金排名
+// direction: "inflow" 净流入降序（流入榜，仅净流入>0）；"outflow" 净流入升序（流出榜，仅净流入<0）
+func (b *BKFundFlowApi) GetBKFundFlowRankListByDate(date string, topN int, direction string) []models.BKFundFlow {
+	if topN <= 0 {
+		topN = 20
+	}
+	order := "net_inflow DESC"
+	cond := "net_inflow > 0"
+	if direction == "outflow" {
+		order = "net_inflow ASC"
+		cond = "net_inflow < 0"
+	}
+
+	// 获取指定日期的最新快照时间
+	var latestTime string
+	db.Dao.Model(&models.BKFundFlow{}).
+		Select("MAX(snap_time)").
+		Where("snap_time LIKE ?", date+"%").
+		Scan(&latestTime)
+	if latestTime == "" {
+		return []models.BKFundFlow{}
+	}
+
+	var list []models.BKFundFlow
+	err := db.Dao.Where("snap_time = ? AND "+cond, latestTime).
+		Order(order).
+		Limit(topN).
+		Find(&list).Error
+	if err != nil {
+		logger.SugaredLogger.Errorf("GetBKFundFlowRankListByDate error: %v", err)
 		return []models.BKFundFlow{}
 	}
 	return list
@@ -198,17 +246,37 @@ func (b *BKFundFlowApi) GetAllBKCodes() []map[string]string {
 	return results
 }
 
+// deleteOldRowsInBatches 分批删除大表的历史数据。
+// 单条 DELETE 一次删掉上百万行会长时间持有写锁并产生超大 WAL，期间其他读写全部卡住；
+// 这里限制每批行数，批间让出短暂间隔，把阻塞摊平。
+// table/column 均为代码内常量，不涉及外部输入。
+func deleteOldRowsInBatches(table, column, cutoff string) int64 {
+	const batchSize = 20000
+	var total int64
+	for {
+		res := db.Dao.Exec(fmt.Sprintf(
+			"DELETE FROM %s WHERE id IN (SELECT id FROM %s WHERE %s < ? LIMIT %d)",
+			table, table, column, batchSize), cutoff)
+		if res.Error != nil {
+			logger.SugaredLogger.Errorf("clean %s error: %v", table, res.Error)
+			break
+		}
+		total += res.RowsAffected
+		if res.RowsAffected == 0 {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	return total
+}
+
 // CleanOldData 清理N天前的旧数据
 func (b *BKFundFlowApi) CleanOldData(days int) int64 {
 	if days <= 0 {
 		days = 3
 	}
 	cutoff := time.Now().AddDate(0, 0, -days).Format("2006-01-02 15:04:05")
-	result := db.Dao.Where("snap_time < ?", cutoff).Delete(&models.BKFundFlow{})
-	if result.Error != nil {
-		logger.SugaredLogger.Errorf("CleanOldData error: %v", result.Error)
-		return 0
-	}
-	logger.SugaredLogger.Infof("CleanOldData: deleted %d records before %s", result.RowsAffected, cutoff)
-	return result.RowsAffected
+	deleted := deleteOldRowsInBatches("bk_fund_flow", "snap_time", cutoff)
+	logger.SugaredLogger.Infof("CleanOldData: bk_fund_flow deleted %d records before %s", deleted, cutoff)
+	return deleted
 }

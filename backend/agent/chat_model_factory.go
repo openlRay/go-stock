@@ -158,6 +158,10 @@ func createChatModel(ctx context.Context, aiConfig data.AIConfig) (model.ToolCal
 	p := effective.Provider
 	logger.SugaredLogger.Infof("createChatModel provider=%s host=%q model=%q", p, safeAIEndpointHost(aiConfig.BaseUrl), aiConfig.ModelName)
 
+	// DeepSeek 专用组件会丢失图片块；视觉模式复用 OpenAI 构造链。
+	if p == data.AIProviderDeepSeek && aiConfig.SupportVision {
+		p = data.AIProviderOpenAICompatible
+	}
 	switch p {
 	case data.AIProviderVolcArk:
 		var thinking *ark.Thinking
@@ -398,6 +402,13 @@ func createChatModel(ctx context.Context, aiConfig data.AIConfig) (model.ToolCal
 
 	default:
 		extraFields := map[string]any{}
+		if effective.Provider == data.AIProviderDeepSeek {
+			mode := "disabled"
+			if effective.ReasoningMode != data.ReasoningModeOff {
+				mode = "enabled"
+			}
+			extraFields["thinking"] = map[string]string{"type": mode}
+		}
 		cfg := &einoopenai.ChatModelConfig{
 			BaseURL:             baseURL,
 			Model:               aiConfig.ModelName,

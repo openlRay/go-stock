@@ -147,6 +147,7 @@ const defaultConfig = () => new data.AIConfig({
   httpProxyEnabled: false,
   sessionId: '',
   thinking: true,
+  supportVision: false,
   extraHeaders: '',
   embeddingModel: '',
   isDefault: false,
@@ -509,6 +510,7 @@ const columns = [
     const enabled = (row.reasoningMode || (row.thinking ? 'on' : 'off')) !== 'off'
     return h(NTag, {type: enabled ? 'success' : 'default', size: 'small', bordered: false}, () => enabled ? '开启' : '关闭')
   }},
+  {title: '视觉理解', key: 'supportVision', width: 100, render: row => h(NTag, {type: row.supportVision ? 'success' : 'default', size: 'small', bordered: false}, () => row.supportVision ? '开启' : '关闭')},
   {title: '最大 Token', key: 'maxTokens', width: 110},
   {title: '上下文窗口', key: 'contextWindow', width: 120, render: row => row.contextWindow > 0 ? row.contextWindow : '自动'},
   {title: '操作', key: 'actions', width: 350, fixed: 'right', render: row => h(NSpace, {size: 4}, () => [
@@ -624,6 +626,12 @@ onBeforeUnmount(() => {
             <n-alert v-if="capabilities" type="info" :show-icon="false" style="margin-bottom: 12px">当前能力档案：{{ capabilities.providerName }}</n-alert>
 
             <template v-if="editingConfig.modelType !== 'embedding'">
+            <n-form-item label="视觉理解">
+              <n-space align="center">
+                <n-switch v-model:value="editingConfig.supportVision"/>
+                <n-text depth="3">支持图片输入的模型开启后，可在 AI 助手上传、粘贴图片或使用图片链接。</n-text>
+              </n-space>
+            </n-form-item>
             <n-divider title-placement="left">生成参数</n-divider>
             <n-form-item v-if="capability('temperature').supported">
               <template #label><HelpLabel text="Temperature" :help="capability('temperature').description"/></template>

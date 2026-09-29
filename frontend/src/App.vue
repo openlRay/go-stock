@@ -32,6 +32,7 @@ import {
 import {AnalyzeSentiment, GetConfig, GetGroupList, GetVersionInfo, IsTradingTime, IsHKTradingTime, IsUSTradingTime} from "../wailsjs/go/main/App";
 import FloatingAiAssistant from "./components/FloatingAiAssistant.vue";
 import FloatingAgentAssistant from "./components/FloatingAgentAssistant.vue";
+import SignalMonitorPanel from "./components/SignalMonitorPanel.vue";
 import {Dragon, Fire, FirefoxBrowser, Gripfire, Robot} from "@vicons/fa";
 import {Prompt, ReportAnalytics, ReportMoney, ReportSearch, TrendingUp} from "@vicons/tabler";
 import {LocalFireDepartmentRound} from "@vicons/material";
@@ -744,6 +745,42 @@ const menuOptions = ref([
             ),
         key: 'morningStrategy',
         icon: renderIcon(TimeOutline),
+      },
+      {
+        label: () =>
+            h(
+                RouterLink,
+                {
+                  to: {
+                    name: 'promptBacktest',
+                    params: {},
+                  },
+                  onClick: () => {
+                    activeKey.value = 'promptBacktest'
+                  },
+                },
+                {default: () => '提示词回测(beta)'}
+            ),
+        key: 'promptBacktest',
+        icon: renderIcon(StatsChartOutline),
+      },
+      {
+        label: () =>
+            h(
+                RouterLink,
+                {
+                  to: {
+                    name: 'recommendBacktestStats',
+                    params: {},
+                  },
+                  onClick: () => {
+                    activeKey.value = 'recommendBacktestStats'
+                  },
+                },
+                {default: () => '推荐回测统计'}
+            ),
+        key: 'recommendBacktestStats',
+        icon: renderIcon(AnalyticsOutline),
       },
     ]
   },
@@ -1638,6 +1675,7 @@ onMounted(() => {
             >
 <!--              <FloatingAiAssistant />-->
               <FloatingAgentAssistant />
+              <SignalMonitorPanel />
               <n-flex>
                 <n-grid x-gap="12" :cols="1">
                   <n-gi>

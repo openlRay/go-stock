@@ -18,7 +18,9 @@ const routes = [
   { path: '/ai-configs', component: () => import('../components/ai-config-manager.vue'), name: 'aiConfigs' },
   { path: '/user-profile', component: () => import('../components/user-profile.vue'), name: 'userProfile' },
   { path: '/daily-review', component: () => import('../components/DailyReview.vue'), name: 'dailyReview' },
-  { path: '/morning-strategy', component: () => import('../components/MorningStrategy.vue'), name: 'morningStrategy' }
+  { path: '/morning-strategy', component: () => import('../components/MorningStrategy.vue'), name: 'morningStrategy' },
+  { path: '/prompt-backtest', component: () => import('../components/PromptBacktest.vue'), name: 'promptBacktest' },
+  { path: '/recommend-backtest-stats', component: () => import('../components/RecommendBacktestStats.vue'), name: 'recommendBacktestStats' }
 ]
 
 const router = createRouter({

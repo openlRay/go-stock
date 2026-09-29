@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"go-stock/backend/agent"
 	"go-stock/backend/data"
+	"go-stock/backend/db"
 	"go-stock/backend/logger"
 	"go-stock/backend/models"
 	"strings"
@@ -35,6 +36,23 @@ func (a *App) GetTimezone() map[string]any {
 		"offset":   8 * 60 * 60,
 		"location": "Asia/Shanghai",
 	}
+}
+
+// VacuumDatabase 手动压缩数据库文件（VACUUM），回收已清理数据占用的磁盘空间。
+// SQLite 的 DELETE 不归还磁盘空间，高频写入表长期清理后文件会远大于实际数据量，
+// 导致查询扫描页面数、磁盘 IO 放大而拖慢其它页面。
+// 注意：耗时较长且全程独占写锁，请在非交易时段执行，执行期间其它写入会排队等待。
+func (a *App) VacuumDatabase() string {
+	res, err := db.Vacuum()
+	if err != nil {
+		logger.SugaredLogger.Errorf("VacuumDatabase error: %v", err)
+		return "数据库压缩失败：" + err.Error()
+	}
+	toMB := func(b int64) string { return fmt.Sprintf("%.1f MB", float64(b)/(1024*1024)) }
+	msg := fmt.Sprintf("数据库压缩完成：%s → %s，释放 %s，耗时 %.1f 秒",
+		toMB(res.BeforeBytes), toMB(res.AfterBytes), toMB(res.FreedBytes), res.DurationSec)
+	logger.SugaredLogger.Infof("VacuumDatabase success: %s (file=%s)", msg, res.FilePath)
+	return msg
 }
 
 func (a *App) LongTigerRank(date string) *[]models.LongTigerRankData {
@@ -310,7 +328,7 @@ func (a *App) GetAllStocks(page int, pageSize int, name string, technicalIndicat
 	return data.NewStockDataApi().GetAllStocks(page, pageSize, name, technicalIndicators)
 }
 
-func (a *App) ChatWithAgent(question string, aiConfigId int, sysPromptId *int, memoryMode bool, memoryCount int, thinkingMode bool, agentMode string, sessionId string, skillDirName string) {
+func (a *App) ChatWithAgent(question string, aiConfigId int, sysPromptId *int, memoryMode bool, memoryCount int, thinkingMode bool, agentMode string, sessionId string, skillDirName string, imagesJSON string) {
 	defer func() {
 		if r := recover(); r != nil {
 			logger.SugaredLogger.Errorf("ChatWithAgent panic: %v", r)
@@ -336,6 +354,8 @@ func (a *App) ChatWithAgent(question string, aiConfigId int, sysPromptId *int, m
 	// 技能选择（支持逗号分隔多选）：用户选定技能后构建
 	//   - sysPromptOverride（optsOverride[0]）：技能全文 + 激活纪律（强制主 Agent 应用方法论并在委派时传播）
 	//   - questionBlock（optsOverride[3]）：随用户消息提交的激活块，经 task 委派描述触达子 Agent
+	//   - imagesJSON（optsOverride[4]）：当前提问携带的图片列表 JSON（http(s) 外链或 base64 data URL），
+	//     仅视觉模型生效，参考 https://api-docs.deepseek.com/zh-cn/guides/vision/
 	// 并将 sysPromptId 置空以彻底忽略用户选择的系统提示词。
 	// 前端同时会把已选技能名以 @技能名 形式拼入提问文本一起提交。
 	effectiveSysPromptId := sysPromptId
@@ -349,8 +369,14 @@ func (a *App) ChatWithAgent(question string, aiConfigId int, sysPromptId *int, m
 			effectiveSysPromptId = nil
 		}
 	}
-	// optsOverride[2] 留给恢复会话，技能激活块必须放在 [3]，避免被当成恢复上下文。
-	ch := agent.NewStockAiAgentApi().ChatWithContext(ctx, question, aiConfigId, effectiveSysPromptId, memoryMode, memoryCount, thinkingMode, agentMode, skillPromptOverride, sessionId, "", skillQuestionBlock)
+	// optsOverride 位序（ChatWithContext 定义）：[0]sysPromptOverride [1]sessionIDOverride
+	// [2]resumeContextOverride [3]skillQuestionBlock [4]imagesJSON [5]skillDirName。
+	// 此处不使用 resumeContext（传空占位），漏传会导致后续参数整体左移错位——
+	// 曾导致 imagesJSON 被读作 skillQuestionBlock 拼进用户消息文本（图片 URL 以
+	// 文本形式出现，模型用工具去 fetch 而非视觉识别），真正的图片解析位永远为空。
+	// skillDirName（[5]）：技能目录名（逗号分隔），经 AgentMeta 注入推荐工具，
+	// 使推荐记录快照技能 ID，供按技能维度的回测统计。
+	ch := agent.NewStockAiAgentApi().ChatWithContext(ctx, question, aiConfigId, effectiveSysPromptId, memoryMode, memoryCount, thinkingMode, agentMode, skillPromptOverride, sessionId, "", skillQuestionBlock, strings.TrimSpace(imagesJSON), strings.TrimSpace(skillDirName))
 	for msg := range ch {
 		a.emit("agent-message", agentMessageToFrontendMap(msg))
 	}
@@ -577,6 +603,13 @@ func (a *App) GetAiRecommendStocksList(query models.AiRecommendStocksQuery) *mod
 		return &models.AiRecommendStocksPageData{}
 	}
 	return page
+}
+func (a *App) GetAiRecommendStocksTodayStats(date string, days int) *models.AiRecommendStocksTodayStatsData {
+	stats, err := data.NewAiRecommendStocksService().GetAiRecommendStocksTodayStats(date, days)
+	if err != nil {
+		return &models.AiRecommendStocksTodayStatsData{}
+	}
+	return stats
 }
 func (a *App) DeleteAiRecommendStocks(id uint) string {
 	err := data.NewAiRecommendStocksService().DeleteAiRecommendStocks(id)

@@ -467,6 +467,11 @@ func AskAi(o *OpenAi, err error, messages []map[string]interface{}, ch chan map[
 	resp, err := req.Post(chatPath)
 
 	if err != nil {
+		if o.ctx != nil && o.ctx.Err() != nil {
+			// 会话已被取消（新请求或用户中断），不向前端输出错误，避免污染新会话的输出
+			logger.SugaredLogger.Infof("Stream canceled: %s", err.Error())
+			return
+		}
 		logger.SugaredLogger.Errorf("Stream error: %s", err.Error())
 		ch <- map[string]any{
 			"code":     0,
@@ -605,6 +610,10 @@ func AskAi(o *OpenAi, err error, messages []map[string]interface{}, ch chan map[
 		}
 	}
 	if err := scanner.Err(); err != nil {
+		if o.ctx != nil && o.ctx.Err() != nil {
+			// 会话已被取消，不向前端输出取消错误
+			return
+		}
 		logger.SugaredLogger.Errorf("Stream scanner error: %s", err.Error())
 		ch <- map[string]any{
 			"code":     0,
@@ -685,6 +694,11 @@ func AskAiWithToolsDepth(o *OpenAi, err error, messages []map[string]interface{}
 	resp, err := req.Post(chatPath)
 
 	if err != nil {
+		if o.ctx != nil && o.ctx.Err() != nil {
+			// 会话已被取消（新请求或用户中断），不向前端输出错误，避免污染新会话的输出
+			logger.SugaredLogger.Infof("Stream canceled: %s", err.Error())
+			return
+		}
 		logger.SugaredLogger.Errorf("Stream error: %s", err.Error())
 		ch <- map[string]any{
 			"code":     0,
@@ -963,6 +977,10 @@ func AskAiWithToolsDepth(o *OpenAi, err error, messages []map[string]interface{}
 		}
 	}
 	if err := scanner.Err(); err != nil {
+		if o.ctx != nil && o.ctx.Err() != nil {
+			// 会话已被取消，不向前端输出取消错误
+			return
+		}
 		logger.SugaredLogger.Errorf("Stream scanner error: %s", err.Error())
 		ch <- map[string]any{
 			"code":     0,

@@ -607,7 +607,8 @@ func aiConfigUpdateMap(config *AIConfig) map[string]any {
 		"reasoning_budget": config.ReasoningBudget, "time_out": config.TimeOut,
 		"http_proxy": config.HttpProxy, "http_proxy_enabled": config.HttpProxyEnabled,
 		"session_id": config.SessionId, "thinking": config.Thinking,
-		"extra_headers": config.ExtraHeaders, "embedding_model": config.EmbeddingModel,
+		"support_vision": config.SupportVision,
+		"extra_headers":  config.ExtraHeaders, "embedding_model": config.EmbeddingModel,
 	}
 }
 

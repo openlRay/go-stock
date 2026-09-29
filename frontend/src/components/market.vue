@@ -194,6 +194,7 @@ onBeforeUnmount(() => {
   EventsOff("newSinaNews")
   EventsOff("summaryStockNews")
   stopAIConfigsChangedListener()
+  resetSummaryBuffer()
   stopTradingTimers()
   if (tradingCheckInterval.value) {
     clearInterval(tradingCheckInterval.value)
@@ -311,12 +312,16 @@ function industryRank() {
   })
 }
 
+let analysisFailed = false
+
 function reAiSummary() {
+  resetSummaryBuffer()
   aiSummary.value = ""
+  analysisFailed = false
   summaryModal.value = true
   loading.value = true
   analysisStatus.value = "正在连接AI服务..."
-  SummaryStockNews(question.value,aiConfigId.value, sysPromptId.value,enableTools.value,thinkingMode.value,"summaryStockNews","")
+  SummaryStockNews(question.value,aiConfigId.value, sysPromptId.value,enableTools.value,thinkingMode.value,"summaryStockNews","","","")
 }
 
 function getAiSummary() {
@@ -352,21 +357,83 @@ function updateTab(name) {
   nowTab.value = name
 }
 
+// 流式输出缓冲：AI 总结每秒可能推送数十条增量，逐条写入 aiSummary 会让 MdPreview
+// 整篇重新解析 markdown（输出越长越卡），这里按固定间隔合并刷新，内容顺序不变，
+// 渲染次数降到每秒 8 次左右。
+const SUMMARY_FLUSH_INTERVAL = 120
+let summaryBuffer = ""
+let summaryFlushTimer = null
+
+function flushSummaryBuffer() {
+  if (summaryFlushTimer) {
+    clearTimeout(summaryFlushTimer)
+    summaryFlushTimer = null
+  }
+  if (!summaryBuffer) return
+  aiSummary.value += summaryBuffer
+  summaryBuffer = ""
+  scrollToAiResultBottom()
+}
+
+function appendSummaryChunk(text) {
+  summaryBuffer += text
+  if (!summaryFlushTimer) {
+    summaryFlushTimer = setTimeout(flushSummaryBuffer, SUMMARY_FLUSH_INTERVAL)
+  }
+}
+
+function resetSummaryBuffer() {
+  if (summaryFlushTimer) {
+    clearTimeout(summaryFlushTimer)
+    summaryFlushTimer = null
+  }
+  summaryBuffer = ""
+}
+
 EventsOn("summaryStockNews", async (msg) => {
   if (msg === "DONE") {
-    await SaveAIResponseResult("市场资讯", "市场资讯", aiSummary.value, chatId.value, question.value,aiConfigId.value)
+    // 结束前先落盘缓冲区，保证保存/展示的内容完整
+    flushSummaryBuffer()
     loading.value = false
-    analysisStatus.value = "分析完成"
     message.destroyAll()
-    notify.success({
-      title: 'AI分析完成',
-      content: '市场资讯分析已完成',
-      duration: 3000,
-    })
+    if (analysisFailed) {
+      // 分析过程出错（网络/模型服务/超时），不能提示"分析完成"，也不保存错误内容
+      analysisStatus.value = "分析出错"
+      notify.error({
+        title: 'AI分析出错',
+        content: '分析中断或模型服务返回错误，详见分析内容',
+        duration: 5000,
+      })
+    } else {
+      await SaveAIResponseResult("市场资讯", "市场资讯", aiSummary.value, chatId.value, question.value,aiConfigId.value)
+      analysisStatus.value = "分析完成"
+      notify.success({
+        title: 'AI分析完成',
+        content: '市场资讯分析已完成',
+        duration: 3000,
+      })
+    }
     setTimeout(() => {
       analysisStatus.value = ""
     }, 3000)
+  } else if (msg === "CANCELLED") {
+    // 当前请求被新的总结请求或手动中断取代：
+    // 若已有内容则标记中断；内容为空说明新的分析正在进行，静默忽略
+    flushSummaryBuffer()
+    if (aiSummary.value) {
+      loading.value = false
+      analysisStatus.value = "分析已被中断"
+      setTimeout(() => {
+        if (analysisStatus.value === "分析已被中断") {
+          analysisStatus.value = ""
+        }
+      }, 3000)
+    }
   } else {
+    if (msg.code === 0) {
+      // 后端标记的错误消息（网络/HTTP/超时等），不再以"分析完成"收场
+      analysisFailed = true
+    }
     if (msg.chatId) {
       chatId.value = msg.chatId
     }
@@ -380,13 +447,13 @@ EventsOn("summaryStockNews", async (msg) => {
       loading.value = false
     }
     if (msg.content) {
-      aiSummary.value = aiSummary.value + msg.content
+      appendSummaryChunk(msg.content)
     }
     if (msg.reasoning_content) {
-      aiSummary.value = aiSummary.value + msg.reasoning_content
+      appendSummaryChunk(msg.reasoning_content)
     }
     if (msg.extraContent) {
-      aiSummary.value = aiSummary.value + msg.extraContent
+      appendSummaryChunk(msg.extraContent)
     }
     if (msg.model) {
       modelName.value = msg.model
@@ -394,7 +461,6 @@ EventsOn("summaryStockNews", async (msg) => {
     if (msg.time) {
       aiSummaryTime.value = msg.time
     }
-    scrollToAiResultBottom()
   }
 })
 

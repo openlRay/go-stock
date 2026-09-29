@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -159,6 +160,7 @@ func (receiver StockAiAgent) ChatWithContext(ctx context.Context, question strin
 		var sysPromptOverride string
 		var resumeContextOverride string
 		var skillQuestionBlock string
+		var imagesJSON string
 		if len(optsOverride) > 0 && optsOverride[0] != "" {
 			sysPromptOverride = optsOverride[0]
 		}
@@ -170,6 +172,18 @@ func (receiver StockAiAgent) ChatWithContext(ctx context.Context, question strin
 		}
 		if len(optsOverride) > 3 && optsOverride[3] != "" {
 			skillQuestionBlock = optsOverride[3]
+		}
+		// imagesJSON（optsOverride[4]）：当前提问携带的图片列表 JSON，
+		// 元素为 http(s) 图片外链或 base64 data URL，仅视觉模型生效。
+		if len(optsOverride) > 4 && optsOverride[4] != "" {
+			imagesJSON = optsOverride[4]
+		}
+		// skillDirName（optsOverride[5]）：用户显式选择的文件系统技能目录名（逗号分隔）。
+		// 经 AgentMeta 注入推荐工具（CreateAiRecommendStocks 等），使推荐记录快照技能 ID，
+		// 供按技能维度的回测统计；未选技能时为空。
+		var skillDirName string
+		if len(optsOverride) > 5 {
+			skillDirName = strings.TrimSpace(optsOverride[5])
 		}
 
 		stockAiAgent, agentErr := receiver.newStockAiAgent(&ctx, aiConfigId, thinkingMode, question, agentMode)
@@ -234,6 +248,11 @@ func (receiver StockAiAgent) ChatWithContext(ctx context.Context, question strin
 		sysPrompt += staticRulesParallel
 		sysPrompt += staticRulesRetrieval
 
+		// 推荐记录保存规则（默认开启）：提示词回测调用跳过，见 isPromptBacktestCall 注释
+		if !isPromptBacktestCall(question, sysPrompt) {
+			sysPrompt += staticRulesRecommendSave
+		}
+
 		// 任务规划模板：仅在 PlanExecute 模式下注入，引导模型输出结构化任务清单
 		if stockAiAgent.instance != nil && stockAiAgent.instance.Mode == PlanExecute {
 			sysPrompt += staticRulesPlanExecute
@@ -290,10 +309,63 @@ func (receiver StockAiAgent) ChatWithContext(ctx context.Context, question strin
 		if skillQuestionBlock != "" {
 			userContent = skillQuestionBlock + question
 		}
-		messages = append(messages, &schema.Message{
+		// 视觉理解：解析当前提问携带的图片（http(s) 外链或 base64 data URL）。
+		// 仅视觉模型（AI 配置开启 SupportVision）生效，图片以 OpenAI 兼容 image_url 内容块
+		// 随用户消息下发（含 DeepSeek-Vision / GLM-4V / Qwen-VL 等，参考
+		// https://api-docs.deepseek.com/zh-cn/guides/vision/）；历史消息中的图片不重发。
+		images := parseImagesJSON(imagesJSON)
+		if len(images) > 0 {
+			if aiConfig == nil || !aiConfig.SupportVision {
+				logger.SugaredLogger.Warnf("model does not support vision, dropping %d image(s)", len(images))
+				safeSend(ch, &schema.Message{
+					Role:    schema.Assistant,
+					Content: "❗当前模型未开启视觉理解，图片已被忽略。请在「AI模型服务配置」中为支持视觉的模型开启该选项。",
+				})
+				images = nil
+			}
+		}
+		userMsg := &schema.Message{
 			Role:    schema.User,
 			Content: userContent,
-		})
+		}
+		if len(images) > 0 {
+			if userContent == "" {
+				userContent = "请分析这些图片"
+				userMsg.Content = userContent
+			}
+			// eino OpenAI 兼容实现：UserInputMultiContent 转为 content 内容块数组
+			// （text + image_url）。按模型提供商适配图片字段：
+			//   - OpenAI 系（含 DeepSeek/Qwen/Ark/OpenRouter/硅基流动等）：URL 字段直传
+			//     http(s) 外链或 data URL（OpenAI 兼容 image_url 原生支持两者）；
+			//   - Claude（Anthropic）：http URL 直传，data URL 需拆解为 raw base64 + MIMEType；
+			//   - Gemini / Ollama：不支持 http URL（Gemini 视作 File URI、Ollama 直接报错），
+			//     http 外链需后端下载转 base64，data URL 拆解后填 Base64Data。
+			imageParts, imgErr := buildVisionImageParts(images, aiConfig)
+			if imgErr != nil {
+				logger.SugaredLogger.Errorf("build vision image parts failed: %v", imgErr)
+				safeSend(ch, &schema.Message{
+					Role:    schema.Assistant,
+					Content: "❗图片处理失败：" + imgErr.Error(),
+				})
+				images = nil
+			} else {
+				parts := make([]schema.MessageInputPart, 0, len(imageParts)+1)
+				parts = append(parts, schema.MessageInputPart{
+					Type: schema.ChatMessagePartTypeText,
+					Text: userContent,
+				})
+				parts = append(parts, imageParts...)
+				// 关键：Content 与 UserInputMultiContent 必须互斥。openai SDK 的
+				// ChatCompletionMessage 序列化在 Content 与 MultiContent 同时非空时直接报错
+				// （"can't use both Content and MultiContent properties simultaneously"），
+				// 文本已作为第一个 text 块存在于 parts 中，此处必须清空 Content。
+				userMsg.Content = ""
+				userMsg.UserInputMultiContent = parts
+				logger.SugaredLogger.Infof("vision: 下发 %d 张图片（config=%s, model=%s）",
+					len(imageParts), aiConfig.Name, aiConfig.ModelName)
+			}
+		}
+		messages = append(messages, userMsg)
 
 		if memoryService != nil {
 			// 注意：用户消息不再在此处提前保存，改为在各 Agent 执行成功后与助手消息一起保存，
@@ -301,6 +373,37 @@ func (receiver StockAiAgent) ChatWithContext(ctx context.Context, question strin
 		}
 
 		messages = validateAndFixMessages(messages)
+
+		// 注意：以下三段 ctx 注入必须在 NewAgentRunner 之前完成。AgentRunner 在创建时
+		// 捕获当前 ctx（r.ctx），Executor 与工具中间件均使用该 ctx；若在 NewAgentRunner
+		// 之后注入，WithValue 生成的新链只存在于局部变量，实际执行链中取不到这些值。
+		// 注入实际模型名与系统/用户提示词，供推荐工具（CreateAiRecommendStocks 等）在
+		// InvokableRun 中提取，确保保存的推荐记录关联真实的模型与提示词，而非 AI 自填值。
+		actualModelName := ""
+		if aiConfig != nil {
+			actualModelName = aiConfig.ModelName
+		}
+		// 快照提示词模板 ID：直接取 sysPromptId 参数（复盘/盘前策略等 override 场景下
+		// 调用方同样把模板 ID 作为 sysPromptId 传入）；内置默认提示词为 0。
+		metaSysPromptId := 0
+		if sysPromptId != nil {
+			metaSysPromptId = *sysPromptId
+		}
+		ctx = tools.WithAgentMeta(ctx, tools.AgentMeta{
+			ModelName:    actualModelName,
+			SystemPrompt: sysPrompt,
+			UserPrompt:   question,
+			SysPromptId:  metaSysPromptId,
+			SkillId:      skillDirName,
+		})
+		// 注入前端进度反馈 channel：工具调用前后通过 ReasoningContent 发送预告与结果摘要
+		ctx = WithProgressChannel(ctx, ch)
+		// 注入摘要模型：trimToolResult 对超长工具结果调用 LLM 生成摘要
+		if stockAiAgent.instance != nil && stockAiAgent.instance.ChatModel != nil {
+			ctx = WithSummaryModel(ctx, stockAiAgent.instance.ChatModel)
+		}
+		// 注入本轮推荐保存跟踪器：推荐工具调用后置位，收尾自动保存据此去重（见 auto_recommend_saver.go）
+		ctx = tools.WithRecommendSavedTracker(ctx)
 
 		ctx, turnTrace := NewAgentTurnTrace(ctx, question)
 		mode := React
@@ -323,24 +426,6 @@ func (receiver StockAiAgent) ChatWithContext(ctx context.Context, question strin
 			logger.SugaredLogger.Infof("agent run completed: run_id=%s mode=%s state=%s tools=%d elapsed=%s",
 				run.ID, mode, run.State(), run.ToolCalls(), run.Elapsed().Round(time.Millisecond))
 		}()
-
-		// 注入实际模型名与系统/用户提示词，供推荐工具（CreateAiRecommendStocks 等）在
-		// InvokableRun 中提取，确保保存的推荐记录关联真实的模型与提示词，而非 AI 自填值。
-		actualModelName := ""
-		if aiConfig != nil {
-			actualModelName = aiConfig.ModelName
-		}
-		ctx = tools.WithAgentMeta(ctx, tools.AgentMeta{
-			ModelName:    actualModelName,
-			SystemPrompt: sysPrompt,
-			UserPrompt:   question,
-		})
-		// 注入前端进度反馈 channel：工具调用前后通过 ReasoningContent 发送预告与结果摘要
-		ctx = WithProgressChannel(ctx, ch)
-		// 注入摘要模型：trimToolResult 对超长工具结果调用 LLM 生成摘要
-		if stockAiAgent.instance != nil && stockAiAgent.instance.ChatModel != nil {
-			ctx = WithSummaryModel(ctx, stockAiAgent.instance.ChatModel)
-		}
 
 		runner.Execute(AgentExecutionInput{
 			StockAgent:      stockAiAgent,
@@ -547,6 +632,8 @@ func runReact(ctx context.Context, stockAiAgent *StockAiAgent, messages []*schem
 		// streamSuccess 仅用于决定是否将 reasoning_content 作为兜底回复（见上方分支）。
 		if fullResponse.Len() != 0 {
 			final := fullResponse.String()
+			// 推荐记录自动保存（默认开启，异步执行避免行情拉取阻塞收尾）：见 auto_recommend_saver.go
+			go autoSaveRecommendRecords(ctx, question, final)
 			SendFinancialFactCheck(ctx, ch, final)
 			archiveAnalysisReport(question, final, React)
 			triggerPostTaskReflection(question, final, React, deepAgentRootDir())
@@ -703,6 +790,8 @@ func runDeepAgents(ctx context.Context, stockAiAgent *StockAiAgent, messages []*
 
 	if fullResponse.Len() != 0 {
 		final := fullResponse.String()
+		// 推荐记录自动保存（默认开启，异步执行避免行情拉取阻塞收尾）：见 auto_recommend_saver.go
+		go autoSaveRecommendRecords(ctx, question, final)
 		SendFinancialFactCheck(ctx, ch, final)
 		archiveAnalysisReport(question, final, DeepAgents)
 		triggerPostTaskReflection(question, final, DeepAgents, deepAgentRootDir())
@@ -876,6 +965,8 @@ func tryPlanExecute(ctx context.Context, stockAiAgent *StockAiAgent, messages []
 
 	if fullResponse.Len() != 0 {
 		final := fullResponse.String()
+		// 推荐记录自动保存（默认开启，异步执行避免行情拉取阻塞收尾）：见 auto_recommend_saver.go
+		go autoSaveRecommendRecords(ctx, question, final)
 		SendFinancialFactCheck(ctx, ch, final)
 		archiveAnalysisReport(question, final, PlanExecute)
 		triggerPostTaskReflection(question, final, PlanExecute, deepAgentRootDir())
@@ -1123,6 +1214,8 @@ func runReactWithAgent(ctx context.Context, reactAgent *react.Agent, messages []
 		// 否则降级路径下也会出现"下一轮找不到之前分析内容"的问题。
 		if fullResponse.Len() != 0 {
 			final := fullResponse.String()
+			// 推荐记录自动保存（默认开启，异步执行避免行情拉取阻塞收尾）：见 auto_recommend_saver.go
+			go autoSaveRecommendRecords(ctx, question, final)
 			SendFinancialFactCheck(ctx, ch, final)
 			archiveAnalysisReport(question, final, React)
 			triggerPostTaskReflection(question, final, React, deepAgentRootDir())
@@ -1284,6 +1377,39 @@ func processMessageFuture(msgFuture react.MessageFuture, ch chan *schema.Message
 }
 
 func processAdkMessageStream(ctx context.Context, sr *schema.StreamReader[*schema.Message], role schema.RoleType, toolName string, ch chan *schema.Message, fullResponse *strings.Builder) {
+	// 工具结果流聚合：流式工具（如 execute）的输出按行推送，每个分片都是一条
+	// Tool 消息；若逐条转发，前端会刷出大量 "✅ xxx 返回结果（N字）" 中间步骤。
+	// 此处聚合整条流，结束后只发送一条汇总（总字数），不再逐步上报中间结果。
+	if role == schema.Tool {
+		var totalLen int
+		var preview strings.Builder
+		for {
+			msg, err := sr.Recv()
+			if err != nil {
+				break
+			}
+			if msg == nil {
+				continue
+			}
+			if msg.Content != "" {
+				totalLen += len(msg.Content)
+				if preview.Len() < 300 {
+					preview.WriteString(msg.Content)
+				}
+			}
+		}
+		if totalLen > 0 {
+			safeSend(ch, &schema.Message{
+				Role:             schema.Assistant,
+				Content:          "",
+				ReasoningContent: fmt.Sprintf("[STEP]✅ %s 返回结果（%d字）\n", toolName, totalLen),
+			})
+			fmt.Printf("\n[ToolResult] %s:\n%s\n", toolName, truncateString(preview.String(), 300))
+		}
+		logger.SugaredLogger.Debugf("processAdkMessageStream tool result aggregated: tool=%s total_len=%d", toolName, totalLen)
+		return
+	}
+
 	for {
 		msg, err := sr.Recv()
 		if err != nil {
@@ -1599,6 +1725,191 @@ func truncateString(s string, maxLen int) string {
 	return s[:maxLen] + "..."
 }
 
+// parseImagesJSON 解析前端传入的图片列表 JSON（元素为 http(s) 外链或 base64 data URL），
+// 解析失败或无有效项时返回 nil。
+func parseImagesJSON(imagesJSON string) []string {
+	imagesJSON = strings.TrimSpace(imagesJSON)
+	if imagesJSON == "" {
+		return nil
+	}
+	var images []string
+	if err := json.Unmarshal([]byte(imagesJSON), &images); err != nil {
+		logger.SugaredLogger.Warnf("parseImagesJSON failed: %v", err)
+		return nil
+	}
+	valid := make([]string, 0, len(images))
+	for _, img := range images {
+		if img = strings.TrimSpace(img); img != "" {
+			valid = append(valid, img)
+		}
+	}
+	if len(valid) == 0 {
+		return nil
+	}
+	return valid
+}
+
+// maxVisionImageDownloadSize 后端代下图片（Gemini/Ollama 不支持 http URL）的单图上限 10MB。
+const maxVisionImageDownloadSize = 10 * 1024 * 1024
+
+// buildVisionImageParts 按模型提供商把图片列表（http(s) 外链或 base64 data URL）转换为
+// eino 多模态内容块，抹平各组件对 image_url 的差异：
+//   - OpenAI 系（默认兼容/DeepSeek/Qwen/Ark/OpenRouter）：URL 字段直传（http 外链与 data URL 均原生支持）；
+//   - Claude：http URL 走 URL 字段；data URL 拆解为 raw base64 + MIMEType 走 Base64Data
+//     （Anthropic 组件禁止 Base64Data 带 data: 前缀，URL 字段也不接受 data URL）；
+//   - Gemini / Ollama：不支持 http URL（Gemini 将 URL 视作 File URI、Ollama 直接报错），
+//     http 外链由后端下载转 raw base64，data URL 拆解，统一走 Base64Data 字段。
+func buildVisionImageParts(images []string, aiConfig *data.AIConfig) ([]schema.MessageInputPart, error) {
+	if aiConfig == nil {
+		aiConfig = &data.AIConfig{}
+	}
+	provider := data.DetectAIModelProvider(
+		strings.ToLower(normalizeChatModelBaseURL(aiConfig.BaseUrl)), aiConfig.ModelName)
+
+	parts := make([]schema.MessageInputPart, 0, len(images))
+	for _, img := range images {
+		img = strings.TrimSpace(img)
+		if img == "" {
+			continue
+		}
+		isDataURL := strings.HasPrefix(img, "data:")
+		switch provider {
+		case data.AIProviderAnthropic:
+			if isDataURL {
+				mimeType, raw, err := splitDataURL(img)
+				if err != nil {
+					return nil, fmt.Errorf("解析 base64 图片失败: %w", err)
+				}
+				p := raw
+				parts = append(parts, schema.MessageInputPart{
+					Type: schema.ChatMessagePartTypeImageURL,
+					Image: &schema.MessageInputImage{
+						MessagePartCommon: schema.MessagePartCommon{
+							Base64Data: &p,
+							MIMEType:   mimeType,
+						},
+					},
+				})
+			} else {
+				u := img
+				parts = append(parts, schema.MessageInputPart{
+					Type: schema.ChatMessagePartTypeImageURL,
+					Image: &schema.MessageInputImage{
+						MessagePartCommon: schema.MessagePartCommon{URL: &u},
+					},
+				})
+			}
+		case data.AIProviderGemini, data.AIProviderOllama:
+			// Gemini genai.NewPartFromBytes 与 Ollama 组件均要求 MIMEType
+			mimeType, raw, err := imageDataToBase64(img, true)
+			if err != nil {
+				return nil, err
+			}
+			p := raw
+			parts = append(parts, schema.MessageInputPart{
+				Type: schema.ChatMessagePartTypeImageURL,
+				Image: &schema.MessageInputImage{
+					MessagePartCommon: schema.MessagePartCommon{
+						Base64Data: &p,
+						MIMEType:   mimeType,
+					},
+				},
+			})
+		default:
+			// OpenAI 兼容系：URL 字段直传（http 外链 / data URL 均可）
+			u := img
+			parts = append(parts, schema.MessageInputPart{
+				Type: schema.ChatMessagePartTypeImageURL,
+				Image: &schema.MessageInputImage{
+					MessagePartCommon: schema.MessagePartCommon{URL: &u},
+				},
+			})
+		}
+	}
+	return parts, nil
+}
+
+// splitDataURL 拆解 data URL（data:image/png;base64,xxxx）为 MIMEType 与 raw base64。
+func splitDataURL(dataURL string) (mimeType, raw string, err error) {
+	// data:<mime>[;base64],<data>
+	if !strings.HasPrefix(dataURL, "data:") {
+		return "", "", fmt.Errorf("不是有效的 data URL")
+	}
+	rest := dataURL[len("data:"):]
+	commaIdx := strings.Index(rest, ",")
+	if commaIdx < 0 {
+		return "", "", fmt.Errorf("data URL 缺少数据段")
+	}
+	header := rest[:commaIdx]
+	mimeType = strings.TrimSuffix(header, ";base64")
+	if mimeType == "" || !strings.Contains(mimeType, "/") {
+		return "", "", fmt.Errorf("data URL 缺少 MIME 类型")
+	}
+	return mimeType, rest[commaIdx+1:], nil
+}
+
+// imageDataToBase64 把 data URL 拆解或 http 外链下载为 raw base64 + MIMEType，
+// 供 Gemini / Ollama（仅接受 Base64Data）使用。ollama 需要 MIMEType，gemini 的
+// decodeBase64Data 对 MIMEType 容错（空值时按 data URL 前缀解析）。
+func imageDataToBase64(img string, needMime bool) (mimeType, raw string, err error) {
+	if strings.HasPrefix(img, "data:") {
+		return splitDataURL(img)
+	}
+	if !strings.HasPrefix(img, "http://") && !strings.HasPrefix(img, "https://") {
+		return "", "", fmt.Errorf("不支持的图片格式（仅 http(s) 外链或 data URL）")
+	}
+	// 下载外链图片转 base64
+	resp, err := data.CreateHTTPClientWithTimeout(60 * time.Second).R().Get(img)
+	if err != nil {
+		return "", "", fmt.Errorf("下载图片失败: %w", err)
+	}
+	if resp.IsError() {
+		return "", "", fmt.Errorf("下载图片失败: HTTP %d", resp.StatusCode())
+	}
+	body := resp.Body()
+	if len(body) == 0 {
+		return "", "", fmt.Errorf("下载图片为空")
+	}
+	if len(body) > maxVisionImageDownloadSize {
+		return "", "", fmt.Errorf("图片超过 10MB 限制")
+	}
+	m := resp.Header().Get("Content-Type")
+	if needMime {
+		if idx := strings.Index(m, ";"); idx > 0 {
+			m = m[:idx]
+		}
+		if !strings.Contains(m, "/") {
+			// 常见兜底：图床外链 Content-Type 缺失时按扩展名推断
+			m = mimeTypeFromImageURL(img)
+		}
+		if m == "" {
+			return "", "", fmt.Errorf("无法识别图片 MIME 类型")
+		}
+	} else {
+		m = ""
+	}
+	return m, base64.StdEncoding.EncodeToString(body), nil
+}
+
+// mimeTypeFromImageURL 按图片 URL 扩展名推断 MIME 类型。
+func mimeTypeFromImageURL(u string) string {
+	lower := strings.ToLower(u)
+	switch {
+	case strings.Contains(lower, ".png"):
+		return "image/png"
+	case strings.Contains(lower, ".gif"):
+		return "image/gif"
+	case strings.Contains(lower, ".webp"):
+		return "image/webp"
+	case strings.Contains(lower, ".bmp"):
+		return "image/bmp"
+	case strings.Contains(lower, ".avif"):
+		return "image/avif"
+	default:
+		return "image/jpeg"
+	}
+}
+
 // validateAndFixMessages 验证并修复消息序列，确保兼容各类模型API的消息格式要求。
 // 处理：1)移除空消息 2)去除连续重复User消息 3)修复孤立的Tool消息 4)确保消息序列合法
 func validateAndFixMessages(messages []*schema.Message) []*schema.Message {
@@ -1606,13 +1917,13 @@ func validateAndFixMessages(messages []*schema.Message) []*schema.Message {
 		return messages
 	}
 
-	// 1. 移除空消息
+	// 1. 移除空消息（含 UserInputMultiContent 的多模态消息不算空）
 	var cleaned []*schema.Message
 	for _, msg := range messages {
 		if msg == nil {
 			continue
 		}
-		if msg.Content == "" && len(msg.ToolCalls) == 0 && msg.ToolCallID == "" && msg.ReasoningContent == "" {
+		if msg.Content == "" && len(msg.ToolCalls) == 0 && msg.ToolCallID == "" && msg.ReasoningContent == "" && len(msg.UserInputMultiContent) == 0 {
 			continue
 		}
 		cleaned = append(cleaned, msg)

@@ -4,6 +4,8 @@ package data
 import (
 	"go-stock/backend/db"
 	"go-stock/backend/models"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/duke-git/lancet/v2/datetime"
@@ -136,6 +138,131 @@ func (s *AiRecommendStocksService) GetAiRecommendStocksList(query *models.AiReco
 		PageSize:   pageSize,
 		TotalPages: totalPages,
 	}, nil
+}
+
+// GetAiRecommendStocksTodayStats 统计截止指定日期（默认今天）近 days 天的推荐股池：按股票聚合推荐次数、评级、开仓价、目标价、止损价，并补充实时行情
+// days <= 1 表示只统计该日期当天，排序按推荐次数倒序
+func (s *AiRecommendStocksService) GetAiRecommendStocksTodayStats(date string, days int) (*models.AiRecommendStocksTodayStatsData, error) {
+	var list []models.AiRecommendStocks
+
+	day := time.Now()
+	if d := strings.TrimSpace(date); d != "" {
+		if parsed, err := time.Parse("2006-01-02", d); err == nil {
+			day = parsed
+		}
+	}
+	if days <= 0 {
+		days = 1
+	}
+	startDay := day.AddDate(0, 0, -(days - 1))
+
+	err := db.Dao.Model(&models.AiRecommendStocks{}).
+		Where("data_time BETWEEN ? AND ?", datetime.BeginOfDay(startDay), datetime.EndOfDay(day)).
+		Order("created_at ASC").
+		Find(&list).Error
+	if err != nil {
+		return nil, err
+	}
+
+	result := &models.AiRecommendStocksTodayStatsData{
+		Date:  day.Format("2006-01-02"),
+		Items: make([]models.AiRecommendStocksTodayStat, 0),
+	}
+	if days > 1 {
+		result.Date = startDay.Format("2006-01-02") + " ~ " + day.Format("2006-01-02")
+	}
+	// 多日区间下时间需带日期，否则无法区分是哪一天推荐的
+	timeLayout := "15:04"
+	if days > 1 {
+		timeLayout = "01-02 15:04"
+	}
+
+	// 归一化股票代码（000001.SZ -> sz000001）后聚合
+	type todayStatAgg struct {
+		item     models.AiRecommendStocksTodayStat
+		lastTime time.Time
+	}
+	aggs := make([]todayStatAgg, 0)
+	index := make(map[string]int)
+	modelSet := make(map[string]bool)
+	for _, item := range list {
+		code := ConvertTushareCodeToStockCode(item.StockCode)
+		key := code
+		if key == "" {
+			key = item.StockName
+		}
+		idx, ok := index[key]
+		if !ok {
+			aggs = append(aggs, todayStatAgg{
+				item: models.AiRecommendStocksTodayStat{
+					StockCode:  code,
+					StockName:  item.StockName,
+					FirstTime:  item.CreatedAt.Format(timeLayout),
+					ModelNames: []string{},
+				},
+			})
+			idx = len(aggs) - 1
+			index[key] = idx
+		}
+		stat := &aggs[idx].item
+		stat.Count++
+		// 按创建时间升序遍历，后写入的记录覆盖前值，最终保留区间内最后一次推荐的评级与价位
+		stat.StockName = item.StockName
+		stat.BkName = item.BkName
+		stat.Rating = item.Rating
+		stat.RecommendBuyPrice = item.RecommendBuyPrice
+		stat.RecommendBuyPriceMin = item.RecommendBuyPriceMin
+		stat.RecommendBuyPriceMax = item.RecommendBuyPriceMax
+		stat.RecommendStopProfitPrice = item.RecommendStopProfitPrice
+		stat.RecommendStopProfitPriceMin = item.RecommendStopProfitPriceMin
+		stat.RecommendStopProfitPriceMax = item.RecommendStopProfitPriceMax
+		stat.RecommendStopLossPrice = item.RecommendStopLossPrice
+		stat.StockPrice = item.StockPrice
+		stat.LastTime = item.CreatedAt.Format(timeLayout)
+		aggs[idx].lastTime = item.CreatedAt
+		if item.ModelName != "" {
+			modelSet[item.ModelName] = true
+			if !slice.Contain(stat.ModelNames, item.ModelName) {
+				stat.ModelNames = append(stat.ModelNames, item.ModelName)
+			}
+		}
+	}
+
+	// 推荐次数多的优先，次数相同按最近推荐时间倒序
+	sort.SliceStable(aggs, func(i, j int) bool {
+		if aggs[i].item.Count != aggs[j].item.Count {
+			return aggs[i].item.Count > aggs[j].item.Count
+		}
+		return aggs[i].lastTime.After(aggs[j].lastTime)
+	})
+	for _, agg := range aggs {
+		result.Items = append(result.Items, agg.item)
+	}
+
+	// 补充实时行情
+	if len(result.Items) > 0 {
+		codes := slice.Map(result.Items, func(_ int, item models.AiRecommendStocksTodayStat) string {
+			return item.StockCode
+		})
+		if stockData, err := NewStockDataApi().GetStockCodeRealTimeData(codes...); err == nil && stockData != nil {
+			for _, info := range *stockData {
+				infoCode := ConvertTushareCodeToStockCode(info.Code)
+				for i := range result.Items {
+					if result.Items[i].StockCode == infoCode {
+						result.Items[i].StockCurrentPrice = info.Price
+						result.Items[i].StockPrePrice = info.PreClose
+						result.Items[i].StockCurrentPriceTime = info.Date + " " + info.Time
+					}
+				}
+			}
+		}
+	}
+
+	result.StockCount = len(result.Items)
+	result.TotalCount = len(list)
+	result.ModelCount = len(modelSet)
+
+	return result, nil
 }
 
 // GetAiRecommendStocksByID 根据ID获取AI推荐股票记录

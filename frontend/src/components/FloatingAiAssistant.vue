@@ -732,13 +732,20 @@ function sendMessage() {
       historyMessages.length <= maxHistory ? historyMessages : historyMessages.slice(-maxHistory)
     historyJSON = JSON.stringify(toSend.map(m => ({ role: m.role, content: m.content ?? '', reasoning: m.reasoning ?? '' })))
   }
-  SummaryStockNews(text, configId, sysId, true, thinkingMode.value, AI_ASSISTANT_EVENT, historyJSON)
+  SummaryStockNews(text, configId, sysId, true, thinkingMode.value, AI_ASSISTANT_EVENT, historyJSON, '')
   nextTick(scrollToBottom)
 }
 
 let hasSummaryEvent = false
 
 function onSummaryStockNews(msg) {
+  if (msg === 'CANCELLED') {
+    // 当前的回答流被新的请求或手动中断取代，结束加载状态
+    isStreamLoad.value = false
+    sentFromFloating.value = false
+    isAborted.value = false
+    return
+  }
   if (msg === 'DONE') {
     isStreamLoad.value = false
     sentFromFloating.value = false

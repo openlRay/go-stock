@@ -100,6 +100,7 @@ import {useRoute, useRouter} from 'vue-router'
 import MoneyTrend from "./moneyTrend.vue";
 import StockSparkLine from "./stockSparkLine.vue";
 import StockLightweightKlineChart from "./StockLightweightKlineChart.vue";
+import { KLINE_MODAL_CONTENT_STYLE, KLINE_MODAL_STYLE, useKlineModalFit } from "./kline/useKlineModalFit";
 
 const route = useRoute()
 const router = useRouter()
@@ -117,9 +118,6 @@ const kLineChartRef = ref(null);
 const kLineChartRef2 = ref(null);
 
 
-const handleProgress = (progress) => {
-  //console.log(`Export progress: ${progress.ratio * 100}%`);
-};
 const enableEditor = ref(false)
 const mdPreviewRef = ref(null)
 const mdEditorRef = ref(null)
@@ -155,6 +153,9 @@ const modalShow6 = ref(false)
 const modalShow7 = ref(false)
 const lwKlineCode = ref('')
 const lwKlineName = ref('')
+// 多周期 K 线弹窗：尺寸与图表高度自适应，与全站其他 K 线弹窗统一
+const klineWrapRef = ref(null)
+const { chartHeight: lwKlineChartHeight, attach: attachKlineFit, detach: detachKlineFit } = useKlineModalFit(klineWrapRef)
 // gotdx 分时明细弹窗状态
 const tdxMinuteBundle = ref(null)  // TdxMinuteTimeDataBundle
 const tdxMinuteBundleList = ref([]) // 多日模式：[{ dateStr, bundle }]
@@ -672,6 +673,19 @@ const allTableColumns = [
     render(row) {
       const sign = row.changePercent >= 0 ? '+' : ''
       return h(NText, { type: row.type }, { default: () => `${sign}${Number(row.changePercent).toFixed(3)}%` })
+    }
+  },
+  {
+    title: '量比', key: '量比', width: 80,
+    sorter: (a, b) => Number(a['量比'] || 0) - Number(b['量比'] || 0),
+    render(row) {
+      const v = Number(row['量比'])
+      // 港股/美股/北交所无该字段；停牌或集合竞价前为 0，均不展示
+      if (!v || Number.isNaN(v)) {
+        return h(NText, { depth: 3, style: 'font-size:12px;' }, { default: () => '—' })
+      }
+      // >1 放量（红），<1 缩量（绿），便于快速识别是否放量
+      return h(NText, { type: v >= 1 ? 'error' : 'success' }, { default: () => v.toFixed(2) })
     }
   },
   {
@@ -2986,16 +3000,17 @@ function SendMessage(result, type) {
       "![image](" + img + ")\n"
   let title = result["股票名称"] + "(" + result["股票代码"] + ") " + result["当前价格"] + " " + result.changePercent
 
-  let msg = '{' +
-      '     "msgtype": "markdown",' +
-      '     "markdown": {' +
-      '         "title":"[' + typeName + "]" + title + '",' +
-      '         "text": "' + markdown + '"' +
-      '     },' +
-      '      "at": {' +
-      '          "isAtAll": true' +
-      '      }' +
-      ' }'
+  // 必须用 JSON.stringify 生成合法 JSON：手工拼串中的换行会破坏 JSON，钉钉返回 40035
+  let msg = JSON.stringify({
+    msgtype: "markdown",
+    markdown: {
+      title: "[" + typeName + "]" + title,
+      text: markdown
+    },
+    at: {
+      isAtAll: true
+    }
+  })
   // SendDingDingMessage(msg,result["股票代码"])
   SendDingDingMessageByType(msg, result["股票代码"], type)
 }
@@ -3068,7 +3083,17 @@ function checkPriceLineAlerts(result) {
   // })
 
   if (triggeredType > 0) {
-    const msg = `### 📈 价位线预警\n\n### ${stockName} (${stockCodeDisplay})\n\n- 当前价格: ${price}\n- 预警类型: ${triggeredType === 4 ? '止盈触及' : '止损触及'}\n- 开仓价: ${followedStock.EntryPrice || '-'}\n- 止盈价: ${followedStock.TakeProfitPrice || '-'}\n- 止损价: ${followedStock.StopLossPrice || '-'}`;
+    const text = `### 📈 价位线预警\n\n### ${stockName} (${stockCodeDisplay})\n\n- 当前价格: ${price}\n- 预警类型: ${triggeredType === 4 ? '止盈触及' : '止损触及'}\n- 开仓价: ${followedStock.EntryPrice || '-'}\n- 止盈价: ${followedStock.TakeProfitPrice || '-'}\n- 止损价: ${followedStock.StopLossPrice || '-'}`;
+    const msg = JSON.stringify({
+      msgtype: "markdown",
+      markdown: {
+        title: `📈 价位线预警 ${stockName}(${stockCodeDisplay})`,
+        text
+      },
+      at: {
+        isAtAll: true
+      }
+    })
     SendDingDingMessageByType(msg, code, triggeredType)
   }
 }
@@ -3659,6 +3684,15 @@ function searchStockReport(stockCode) {
   })
 }
 
+// 监听多周期 K 线模态框关闭，清除定时器；开关同时驱动图表高度自适应
+watch(modalShow6, (newVal) => {
+  if (newVal) {
+    attachKlineFit()
+  } else {
+    detachKlineFit()
+  }
+})
+
 // 大单过滤切换后，同步分页 itemCount + 回到第 1 页
 watch([tdxAmountFilter, filteredTdxTransactionList], () => {
   tdxTransactionPagination.value.itemCount = filteredTdxTransactionList.value.length
@@ -4088,8 +4122,7 @@ watch([tdxAmountFilter, filteredTdxTransactionList], () => {
       <MdEditor v-if="enableEditor" :toolbars="toolbars" ref="mdEditorRef" style="height: 440px;max-height: 60vh;text-align: left"
                 :modelValue="data.airesult" :theme="theme">
         <template #defToolbars>
-          <ExportPDF :file-name="data.name+'['+data.code+']AI分析报告'" style="text-align: left"
-                     :modelValue="data.airesult" @onProgress="handleProgress"/>
+          <ExportPDF style="text-align: left" :modelValue="data.airesult"/>
         </template>
       </MdEditor>
       <div v-if="!enableEditor" ref="aiResultScrollRef" style="height: 440px;max-height: 60vh;text-align: left;overflow-y: auto;">
@@ -4166,31 +4199,27 @@ watch([tdxAmountFilter, filteredTdxTransactionList], () => {
     v-model:show="modalShow6"
     :title="(lwKlineName || '') + ' — 多周期K线'"
     preset="card"
-    style="width: min(1100px, 96vw); max-width: 96vw; box-sizing: border-box"
-    :content-style="{
-      maxHeight: 'min(85vh, 820px)',
-      overflowY: 'auto',
-      overflowX: 'hidden',
-      minWidth: 0,
-      boxSizing: 'border-box',
-    }"
+    :style="KLINE_MODAL_STYLE"
+    :content-style="KLINE_MODAL_CONTENT_STYLE"
   >
-    <stock-lightweight-kline-chart
-      v-if="modalShow6"
-      :key="'lightweight-' + lwKlineCode"
-      :code="lwKlineCode"
-      :stock-name="lwKlineName"
-      :dark-theme="data.darkTheme"
-      :chart-height="500"
-      :long-entry-price="currentStockTradingPrice.entryPrice"
-      :long-stop-loss-price="currentStockTradingPrice.stopLossPrice"
-      :long-take-profit-price="currentStockTradingPrice.takeProfitPrice"
-      :cost-price="currentStockTradingPrice.costPrice"
-      @update:longEntryPrice="handleLongEntryPriceUpdate"
-      @update:longStopLossPrice="handleLongStopLossPriceUpdate"
-      @update:longTakeProfitPrice="handleLongTakeProfitPriceUpdate"
-      @update:costPrice="handleCostPriceUpdate"
-    />
+    <div ref="klineWrapRef">
+      <stock-lightweight-kline-chart
+        v-if="modalShow6"
+        :key="'lightweight-' + lwKlineCode"
+        :code="lwKlineCode"
+        :stock-name="lwKlineName"
+        :dark-theme="data.darkTheme"
+        :chart-height="lwKlineChartHeight"
+        :long-entry-price="currentStockTradingPrice.entryPrice"
+        :long-stop-loss-price="currentStockTradingPrice.stopLossPrice"
+        :long-take-profit-price="currentStockTradingPrice.takeProfitPrice"
+        :cost-price="currentStockTradingPrice.costPrice"
+        @update:longEntryPrice="handleLongEntryPriceUpdate"
+        @update:longStopLossPrice="handleLongStopLossPriceUpdate"
+        @update:longTakeProfitPrice="handleLongTakeProfitPriceUpdate"
+        @update:costPrice="handleCostPriceUpdate"
+      />
+    </div>
   </n-modal>
 
   <!-- gotdx 分时图 + 分笔成交明细 -->

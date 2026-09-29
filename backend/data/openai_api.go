@@ -27,6 +27,8 @@ type OpenAi struct {
 	HttpProxyEnabled bool     `json:"httpProxyEnabled"`
 	ExtraHeaders     string   `json:"extra_headers"`
 	ChatSource       string   `json:"-"`
+	// SupportVision 控制多模态图片输入。
+	SupportVision bool `json:"support_vision"`
 }
 
 func (o *OpenAi) Ctx() context.Context     { return o.ctx }
@@ -74,6 +76,7 @@ func NewDeepSeekOpenAi(ctx context.Context, aiConfigId int) *OpenAi {
 		HttpProxy:        aiConfig.HttpProxy,
 		HttpProxyEnabled: aiConfig.HttpProxyEnabled,
 		ExtraHeaders:     aiConfig.ExtraHeaders,
+		SupportVision:    aiConfig.SupportVision,
 		Prompt:           settingConfig.Prompt,
 		QuestionTemplate: settingConfig.QuestionTemplate,
 		CrawlTimeOut:     settingConfig.CrawlTimeOut,

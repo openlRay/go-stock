@@ -106,6 +106,10 @@ type AIConfig struct {
 	HttpProxyEnabled      bool     `json:"httpProxyEnabled"`
 	SessionId             string   `json:"sessionId" gorm:"index;size:64"`
 	Thinking              bool     `json:"thinking"`
+	// SupportVision 模型是否支持视觉理解（图片输入，OpenAI 兼容 image_url 内容块）。
+	// 开启后 AI 助手对话可发送图片（base64 data URL 或外部图片 URL），
+	// 适用于 DeepSeek-Vision、GLM-4V、Qwen-VL 等多模态模型。
+	SupportVision bool `json:"supportVision" gorm:"column:support_vision;default:false"`
 	// ExtraHeaders 支持需要额外请求头的 OpenAI 兼容网关。
 	ExtraHeaders string `json:"extraHeaders" gorm:"type:text"`
 	// EmbeddingModel 兼容在对话配置上单独指定向量模型的旧用法。
@@ -340,9 +344,10 @@ func GetSettingConfig() *SettingConfig {
 	aiConfigs := make([]*AIConfig, 0)
 	// 处理数据库查询可能返回的空结果
 	settingsResult := db.Dao.Model(&Settings{}).First(settings)
-	// 新用户无设置记录时，默认启用暗黑主题
+	// 新用户无设置记录时，默认启用暗黑主题与 AI 诊股
 	if errors.Is(settingsResult.Error, gorm.ErrRecordNotFound) {
 		settings.DarkTheme = true
+		settings.OpenAiEnable = true
 	}
 	// AI 配置始终查询，不依赖 OpenAiEnable 开关：
 	// AI 配置管理页面、飞书机器人、AI 助手等独立功能可能在 OpenAiEnable=false 时也需要读取已保存的配置

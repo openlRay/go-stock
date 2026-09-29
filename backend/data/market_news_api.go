@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
@@ -29,6 +30,7 @@ import (
 // -----------------------------------------------------------------------------------
 type MarketNewsApi struct {
 }
+
 /** 财联社电报URL前缀 */
 const (
 	clsTelegraphDetailURLPrefix = "https://www.cls.cn/detail/"
@@ -38,7 +40,9 @@ const (
 func NewMarketNewsApi() *MarketNewsApi {
 	return &MarketNewsApi{}
 }
-/** 
+
+/*
+*
 获取财联社电报URL
 @param news map[string]any
 @return string
@@ -54,7 +58,9 @@ func clsTelegraphURL(news map[string]any) string {
 	}
 	return clsTelegraphDetailURLPrefix + strconv.FormatInt(id, 10)
 }
-/** 
+
+/*
+*
 规范化财联社电报URL
 @param rawURL string
 @return string
@@ -80,7 +86,8 @@ func normalizeClsTelegraphURL(rawURL string) string {
 	return clsTelegraphDetailURLPrefix + id
 }
 
-/** 
+/*
+*
 获取财联社电报列表
 @param crawlTimeOut int64
 @return *[]models.Telegraph
@@ -177,7 +184,8 @@ func (m MarketNewsApi) TelegraphList(crawlTimeOut int64) *[]models.Telegraph {
 	return &telegraphs
 }
 
-/** 
+/*
+*
 获取新的财联社电报列表
 @param crawlTimeOut int64
 @return *[]models.Telegraph
@@ -269,7 +277,9 @@ func (m MarketNewsApi) GetNewTelegraph(crawlTimeOut int64) *[]models.Telegraph {
 	}
 	return &telegraphs
 }
-/** 
+
+/*
+*
 获取财联社电报列表
 @param source string
 @param limit int
@@ -322,23 +332,80 @@ func (m MarketNewsApi) GetNewsList2(source string, limit int) *[]*models.Telegra
 func (m MarketNewsApi) GetTelegraphList(source string) *[]*models.Telegraph {
 	news := &[]*models.Telegraph{}
 	if source != "" {
-		db.Dao.Model(news).Preload("TelegraphTags").Where("source=?", source).Order("data_time desc,time desc").Limit(50).Find(news)
+		db.Dao.Model(news).Where("source=?", source).Order("data_time desc,time desc").Limit(50).Find(news)
 	} else {
-		db.Dao.Model(news).Preload("TelegraphTags").Order("data_time desc,time desc").Limit(50).Find(news)
+		db.Dao.Model(news).Order("data_time desc,time desc").Limit(50).Find(news)
 	}
 	for _, item := range *news {
 		item.Url = normalizeClsTelegraphURL(item.Url)
-		tags := &[]models.Tags{}
-		db.Dao.Model(&models.Tags{}).Where("id in ?", lo.Map(item.TelegraphTags, func(item models.TelegraphTags, index int) uint {
-			return item.TagId
-		})).Find(&tags)
-		tagNames := lo.Map(*tags, func(item models.Tags, index int) string {
-			return item.Name
-		})
-		item.SubjectTags = tagNames
-		//logger.SugaredLogger.Infof("tagNames %v ，SubjectTags：%s", tagNames, item.SubjectTags)
 	}
+	fillTelegraphTags(*news)
 	return news
+}
+
+// fillTelegraphTags 批量补齐快讯的标签名。
+// 原实现逐条查询 Tags（50 条 = 50 次查询），这里改为两条批量查询：
+// 先取这些快讯的全部标签关联，再一次性取出标签名，避免 N+1。
+func fillTelegraphTags(news []*models.Telegraph) {
+	ids := make([]uint, 0, len(news))
+	for _, item := range news {
+		if item != nil {
+			ids = append(ids, item.ID)
+		}
+	}
+	if len(ids) == 0 {
+		return
+	}
+
+	var links []models.TelegraphTags
+	db.Dao.Model(&models.TelegraphTags{}).Where("telegraph_id in ?", ids).Find(&links)
+
+	tagIds := lo.Uniq(lo.Map(links, func(item models.TelegraphTags, _ int) uint {
+		return item.TagId
+	}))
+	tagNames := map[uint]string{}
+	if len(tagIds) > 0 {
+		var tags []models.Tags
+		db.Dao.Model(&models.Tags{}).Where("id in ?", tagIds).Find(&tags)
+		for _, tag := range tags {
+			tagNames[tag.ID] = tag.Name
+		}
+	}
+
+	byTelegraph := make(map[uint][]string, len(ids))
+	for _, link := range links {
+		if name, ok := tagNames[link.TagId]; ok {
+			byTelegraph[link.TelegraphId] = append(byTelegraph[link.TelegraphId], name)
+		}
+	}
+	for _, item := range news {
+		if item == nil {
+			continue
+		}
+		if names, ok := byTelegraph[item.ID]; ok {
+			item.SubjectTags = names
+		} else {
+			// 保持与逐条查询时一致的 JSON 形态（空数组而非 null）
+			item.SubjectTags = []string{}
+		}
+	}
+}
+
+// CleanOldTelegraph 清理指定天数之前的快讯及其标签关联，返回删除的快讯数与关联数。
+// 快讯表只增不减，而页面只展示每个源最新 50 条，历史数据会持续拖慢排序扫描并占用磁盘。
+// 使用 Unscoped 做物理删除，否则 GORM 只会写 deleted_at 标记，表仍然膨胀。
+func (m MarketNewsApi) CleanOldTelegraph(days int) (int64, int64) {
+	if days <= 0 {
+		return 0, 0
+	}
+	cutoff := time.Now().AddDate(0, 0, -days)
+	// 部分历史快讯（约 13 万行）data_time 为空，仅按 data_time 比较会永远漏掉它们，
+	// 这类记录用入库时间兜底判断。
+	cond := "(data_time IS NOT NULL AND data_time < ?) OR (data_time IS NULL AND created_at < ?)"
+	sub := db.Dao.Model(&models.Telegraph{}).Select("id").Where(cond, cutoff, cutoff)
+	linkRes := db.Dao.Unscoped().Where("telegraph_id in (?)", sub).Delete(&models.TelegraphTags{})
+	newsRes := db.Dao.Unscoped().Where(cond, cutoff, cutoff).Delete(&models.Telegraph{})
+	return newsRes.RowsAffected, linkRes.RowsAffected
 }
 func (m MarketNewsApi) GetTelegraphListWithPaging(source string, page, pageSize int) *[]*models.Telegraph {
 	// 计算偏移量
@@ -1675,6 +1742,20 @@ func (m MarketNewsApi) GetNewsListData(keyWord string, startTime time.Time, page
 	return &uniqueNews, total
 }
 
+// 涨停梯队查询短缓存：AI 会话中多个涨停工具（板块/个股/炸板）与回退循环会重复请求同一外部 API，
+// 用 60s TTL 缓存原始响应，避免重复的慢请求。
+var (
+	uplimitHotCacheMu sync.Mutex
+	uplimitHotCache   = map[string]uplimitHotCacheEntry{}
+)
+
+type uplimitHotCacheEntry struct {
+	body     []byte
+	expireAt time.Time
+}
+
+const uplimitHotCacheTTL = 60 * time.Second
+
 func (m MarketNewsApi) GetUplimitHot(date string, limit int) map[string]any {
 	if limit <= 0 {
 		limit = 20
@@ -1682,6 +1763,17 @@ func (m MarketNewsApi) GetUplimitHot(date string, limit int) map[string]any {
 	if date == "" {
 		loc, _ := time.LoadLocation("Asia/Shanghai")
 		date = time.Now().In(loc).Format("2006-01-02")
+	}
+	cacheKey := fmt.Sprintf("%s:%d", date, limit)
+	uplimitHotCacheMu.Lock()
+	if entry, ok := uplimitHotCache[cacheKey]; ok && time.Now().Before(entry.expireAt) {
+		uplimitHotCacheMu.Unlock()
+		var cached map[string]any
+		if err := json.Unmarshal(entry.body, &cached); err == nil {
+			return cached
+		}
+	} else {
+		uplimitHotCacheMu.Unlock()
 	}
 	apiUrl := fmt.Sprintf("https://api.zizizaizai.com/v3/open/review/uplimit/hot?date1=%s&limit=%d", date, limit)
 	resp, err := SharedHTTPClient.SetTimeout(15*time.Second).R().
@@ -1697,7 +1789,42 @@ func (m MarketNewsApi) GetUplimitHot(date string, limit int) map[string]any {
 		logger.SugaredLogger.Errorf("GetUplimitHot unmarshal error: %v", err)
 		return map[string]any{"code": 50000, "message": "数据解析失败"}
 	}
+	uplimitHotCacheMu.Lock()
+	uplimitHotCache[cacheKey] = uplimitHotCacheEntry{body: resp.Body(), expireAt: time.Now().Add(uplimitHotCacheTTL)}
+	uplimitHotCacheMu.Unlock()
 	return result
+}
+
+// GetUplimitHotSmart 带回退的涨停梯队查询（AI 工具用）：
+// date 为空时从今天起逐日向前回退（最多 6 天），返回最近一个有数据的交易日结果，
+// 避免周末/节假日查询当天拿到空数据；返回值二参为实际数据日期，供 AI 工具标注。
+func (m MarketNewsApi) GetUplimitHotSmart(date string, limit int) (map[string]any, string) {
+	if date == "" {
+		loc, _ := time.LoadLocation("Asia/Shanghai")
+		now := time.Now().In(loc)
+		var last map[string]any
+		for i := 0; i <= 6; i++ {
+			t := now.AddDate(0, 0, -i)
+			// 周末无涨停数据，直接跳过，减少无效的慢请求
+			if t.Weekday() == time.Saturday || t.Weekday() == time.Sunday {
+				continue
+			}
+			try := t.Format("2006-01-02")
+			res := m.GetUplimitHot(try, limit)
+			if code, _ := res["code"].(float64); int(code) != 20000 {
+				last = res
+				continue
+			}
+			dataMap, _ := res["data"].(map[string]any)
+			stocks, _ := dataMap["stocks"].(string)
+			if strings.TrimSpace(stocks) != "" {
+				return res, try
+			}
+			last = res
+		}
+		return last, now.Format("2006-01-02")
+	}
+	return m.GetUplimitHot(date, limit), date
 }
 
 // RzrqRank 获取同花顺融资融券排名数据

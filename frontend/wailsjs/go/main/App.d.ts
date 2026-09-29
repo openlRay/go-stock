@@ -49,7 +49,7 @@ export function CalculateNextRunTime(arg1:string):Promise<string>;
 
 export function CalculateNextRunTimes(arg1:string,arg2:number):Promise<Array<string>>;
 
-export function ChatWithAgent(arg1:string,arg2:number,arg3:any,arg4:boolean,arg5:number,arg6:boolean,arg7:string,arg8:string,arg9:string):Promise<void>;
+export function ChatWithAgent(arg1:string,arg2:number,arg3:any,arg4:boolean,arg5:number,arg6:boolean,arg7:string,arg8:string,arg9:string,arg10:string):Promise<void>;
 
 export function ChatWithAgentKBQA(arg1:string,arg2:number,arg3:string,arg4:string):Promise<void>;
 
@@ -62,6 +62,8 @@ export function CheckStockBaseInfo(arg1:context.Context):Promise<void>;
 export function CheckUpdate(arg1:number):Promise<void>;
 
 export function ClearAgentFeedback():Promise<void>;
+
+export function ClearSignalRecords():Promise<string>;
 
 export function ClearUserProfile():Promise<void>;
 
@@ -88,6 +90,8 @@ export function CreateKnowledgeBase(arg1:string,arg2:string,arg3:number,arg4:str
 export function CreateMCPServer(arg1:models.MCPServer):Promise<string>;
 
 export function CreateMotto(arg1:string):Promise<models.Motto>;
+
+export function CreatePromptBacktestTask(arg1:agent.PromptBacktestCreateParams):Promise<models.PromptBacktestTask>;
 
 export function CreateSkill(arg1:models.Skill):Promise<string>;
 
@@ -124,6 +128,8 @@ export function DeleteMCPServer(arg1:number):Promise<string>;
 export function DeleteMorningStrategy(arg1:number):Promise<string>;
 
 export function DeleteMotto(arg1:number):Promise<void>;
+
+export function DeletePromptBacktestTask(arg1:number):Promise<void>;
 
 export function DeletePromptTemplate(arg1:number):Promise<string>;
 
@@ -186,6 +192,8 @@ export function GetAiAssistantSession(arg1:string):Promise<models.AiAssistantSes
 export function GetAiConfigs():Promise<Array<data.AIConfig>>;
 
 export function GetAiRecommendStocksList(arg1:models.AiRecommendStocksQuery):Promise<models.AiRecommendStocksPageData>;
+
+export function GetAiRecommendStocksTodayStats(arg1:string,arg2:number):Promise<models.AiRecommendStocksTodayStatsData>;
 
 export function GetAllBKCodes():Promise<Array<Record<string, string>>>;
 
@@ -371,15 +379,29 @@ export function GetPolicyNews(arg1:string,arg2:number):Promise<any>;
 
 export function GetProfileLearnAiConfigId():Promise<number>;
 
+export function GetPromptBacktestPicks(arg1:number,arg2:number,arg3:number,arg4:number):Promise<agent.PromptBacktestPickPageData>;
+
+export function GetPromptBacktestTaskDetail(arg1:number):Promise<agent.PromptBacktestTaskDetail>;
+
+export function GetPromptBacktestTaskList():Promise<Array<models.PromptBacktestTask>>;
+
+export function GetPromptTemplateBacktestDetail(arg1:number,arg2:number):Promise<agent.TemplateStat>;
+
+export function GetPromptTemplateBacktestStats(arg1:number):Promise<Array<agent.TemplateStat>>;
+
 export function GetPromptTemplateList(arg1:models.PromptTemplateQuery):Promise<models.PromptTemplatePageData>;
 
 export function GetPromptTemplates(arg1:string,arg2:string):Promise<any>;
 
 export function GetRecentDaysMarketStatistic(arg1:number):Promise<Array<models.MarketStatistic>>;
 
-export function GetRecommendBacktestStats():Promise<agent.BacktestStats>;
+export function GetRecommendBacktestStats(arg1:number):Promise<agent.BacktestStats>;
 
 export function GetSectorAnchors(arg1:string):Promise<Array<data.SectorAnchor>>;
+
+export function GetSignalRecordPage(arg1:models.SignalRecordQuery):Promise<models.SignalRecordPageData>;
+
+export function GetSignalStats(arg1:models.SignalStatQuery):Promise<models.SignalStatResult>;
 
 export function GetSkillByID(arg1:number):Promise<models.Skill>;
 
@@ -513,9 +535,13 @@ export function ListKBDocumentsPaged(arg1:string,arg2:number,arg3:number):Promis
 
 export function ListKnowledgeBases():Promise<Array<agent.KnowledgeBaseInfo>>;
 
-export function ListRecommendBacktest(arg1:number,arg2:number):Promise<agent.BacktestPageData>;
+export function ListRecommendBacktest(arg1:number,arg2:number,arg3:number):Promise<agent.BacktestPageData>;
 
-export function ListRecommendBacktestByPrompt(arg1:number,arg2:number,arg3:string,arg4:string):Promise<agent.BacktestPageData>;
+export function ListRecommendBacktestByPrompt(arg1:number,arg2:number,arg3:string,arg4:string,arg5:number):Promise<agent.BacktestPageData>;
+
+export function ListRecommendBacktestBySkill(arg1:number,arg2:number,arg3:string,arg4:number):Promise<agent.BacktestPageData>;
+
+export function ListRecommendBacktestByTemplate(arg1:number,arg2:number,arg3:number,arg4:number):Promise<agent.BacktestPageData>;
 
 export function ListSkillFiles(arg1:string):Promise<Array<main.SkillFileInfo>>;
 
@@ -524,6 +550,8 @@ export function LongTigerRank(arg1:string):Promise<any>;
 export function NewChatStream(arg1:string,arg2:string,arg3:string,arg4:number,arg5:any,arg6:boolean,arg7:boolean):Promise<void>;
 
 export function NewsPush(arg1:any):Promise<void>;
+
+export function NotifySignal(arg1:string,arg2:string,arg3:string,arg4:Array<string>):Promise<string>;
 
 export function OpenURL(arg1:string):Promise<void>;
 
@@ -587,6 +615,8 @@ export function SaveImage(arg1:string,arg2:string):Promise<string>;
 
 export function SaveKeyDepartments(arg1:Array<string>):Promise<string>;
 
+export function SaveSignalRecords(arg1:Array<models.SignalRecord>):Promise<string>;
+
 export function SaveStockChangesToHistory(arg1:Array<number>):Promise<string>;
 
 export function SaveUserProfile(arg1:string):Promise<void>;
@@ -649,9 +679,13 @@ export function StopFeishuBot():Promise<string>;
 
 export function SubmitAgentFeedback(arg1:models.AgentFeedback):Promise<void>;
 
-export function SummaryStockNews(arg1:string,arg2:number,arg3:any,arg4:boolean,arg5:boolean,arg6:string,arg7:string):Promise<void>;
+export function SummaryStockNews(arg1:string,arg2:number,arg3:any,arg4:boolean,arg5:boolean,arg6:string,arg7:string,arg8:string):Promise<void>;
 
 export function TestAIConfig(arg1:data.AIConfig):Promise<models.AIConfigTestResult>;
+
+export function TestDingDingNotice(arg1:string,arg2:string):Promise<string>;
+
+export function TestFeishuNotice(arg1:string,arg2:string,arg3:string):Promise<string>;
 
 export function TestMCPServer(arg1:number):Promise<string>;
 
@@ -691,9 +725,13 @@ export function UpdateSkill(arg1:models.Skill):Promise<string>;
 
 export function UpdateTradingRecord(arg1:data.TradingRecord):Promise<void>;
 
+export function UploadImageToImageBed(arg1:string,arg2:string):Promise<string>;
+
 export function UploadKBFile(arg1:string,arg2:string):Promise<Array<string>>;
 
 export function UploadKBFiles(arg1:string,arg2:Array<string>):Promise<void>;
+
+export function VacuumDatabase():Promise<string>;
 
 export function ValidateCronExpr(arg1:string):Promise<string>;
 

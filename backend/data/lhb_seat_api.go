@@ -70,7 +70,7 @@ func isValidLhbCode(stockCode string) bool {
 func normalizeLhbDate(date string) (string, bool) {
 	date = strings.TrimSpace(date)
 	if date == "" {
-		date = time.Now().Format("2006-01-02")
+		date = LatestLhbTradeDate()
 	}
 	parsed, err := time.Parse("2006-01-02", date)
 	return date, err == nil && parsed.Format("2006-01-02") == date
@@ -105,8 +105,22 @@ func requestLhbData(params map[string]string) ([]byte, error) {
 	return body, nil
 }
 
+// LatestLhbTradeDate 返回最近一个大概率已发布龙虎榜的交易日。
+// 东财龙虎榜在交易日收盘后约 17 点发布：当天 17 点后取今天，
+// 否则向前回退跳过周末（节假日无法本地判断，返回空数据属正常）。
+func LatestLhbTradeDate() string {
+	d := time.Now()
+	if d.Hour() < 17 {
+		d = d.AddDate(0, 0, -1)
+	}
+	for d.Weekday() == time.Saturday || d.Weekday() == time.Sunday {
+		d = d.AddDate(0, 0, -1)
+	}
+	return d.Format("2006-01-02")
+}
+
 // GetLhbSeatDetail 查询个股某交易日龙虎榜买5卖5席位明细。
-// date 为空取当天；返回买卖席位列表（含机构/游资/北向识别）。
+// date 为空回退到最近一个已发布龙虎榜的交易日；返回买卖席位列表（含机构/游资/北向识别）。
 func (receiver LhbSeatApi) GetLhbSeatDetail(stockCode, date string) *models.LhbSeatDetailData {
 	stockCode = normalizeLhbCode(stockCode)
 	date, validDate := normalizeLhbDate(date)
@@ -584,11 +598,12 @@ func matchHotMoneySeat(deptName string) string {
 // GetLhbSeatDetailToMarkdown 渲染席位明细为 Markdown（AI 工具输出用）
 func (receiver LhbSeatApi) GetLhbSeatDetailToMarkdown(stockCode, date string) string {
 	detail := receiver.GetLhbSeatDetail(stockCode, date)
-	if detail == nil || (len(detail.BuySeats) == 0 && len(detail.SellSeats) == 0) {
-		if date == "" {
-			date = time.Now().Format("2006-01-02")
-		}
-		return fmt.Sprintf("## %s %s 龙虎榜席位明细\n\n当日未上榜或无席位明细数据", stockCode, date)
+	if detail == nil {
+		detail = &models.LhbSeatDetailData{StockCode: stockCode, TradeDate: date}
+	}
+	if len(detail.BuySeats) == 0 && len(detail.SellSeats) == 0 {
+		// detail.TradeDate 为实际查询日期（含空日期回退），不能用 time.Now() 以免标错数据日期
+		return fmt.Sprintf("## %s %s 龙虎榜席位明细\n\n当日未上榜或无席位明细数据（龙虎榜于交易日收盘后约17点发布）", stockCode, detail.TradeDate)
 	}
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("## %s %s 龙虎榜席位明细\n\n", detail.StockCode, detail.TradeDate))

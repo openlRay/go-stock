@@ -232,6 +232,10 @@ func Tools(tools []Tool) []Tool {
 		Function: ToolFunction{
 			Name:        "HotStrategyTable",
 			Description: "获取当前热门选股策略",
+			Parameters: &FunctionParameters{
+				Type:       "object",
+				Properties: map[string]any{},
+			},
 		},
 	})
 
@@ -625,6 +629,10 @@ func Tools(tools []Tool) []Tool {
 		Function: ToolFunction{
 			Name:        "GlobalStockIndexesReadable",
 			Description: "获取全球主要指数概览，并输出为 AI 易读的 Markdown 结构化文本。",
+			Parameters: &FunctionParameters{
+				Type:       "object",
+				Properties: map[string]any{},
+			},
 		},
 	})
 
@@ -943,6 +951,10 @@ func Tools(tools []Tool) []Tool {
 		Function: ToolFunction{
 			Name:        "GetCurrentTime",
 			Description: "获取当前本地时间（格式：YYYY-MM-DD HH:mm:ss）及星期几",
+			Parameters: &FunctionParameters{
+				Type:       "object",
+				Properties: map[string]any{},
+			},
 		},
 	})
 
@@ -987,6 +999,10 @@ func Tools(tools []Tool) []Tool {
 		Function: ToolFunction{
 			Name:        "GetMarketData",
 			Description: "获取市场行情数据，包括指数行情、涨跌分布和今日申购信息",
+			Parameters: &FunctionParameters{
+				Type:       "object",
+				Properties: map[string]any{},
+			},
 		},
 	})
 
@@ -1734,13 +1750,13 @@ func Tools(tools []Tool) []Tool {
 		Type: "function",
 		Function: ToolFunction{
 			Name:        "GetLongTigerList",
-			Description: "获取龙虎榜数据（营业部排行榜）",
+			Description: "获取龙虎榜数据（营业部排行榜）。龙虎榜在交易日收盘后约17点发布，查询当日须在17点后，17点前或非交易日请传最近一个已发布的交易日期",
 			Parameters: &FunctionParameters{
 				Type: "object",
 				Properties: map[string]any{
 					"date": map[string]any{
 						"type":        "string",
-						"description": "查询日期，格式：2026-03-28，默认今天",
+						"description": "交易日期，格式：2026-03-28。龙虎榜收盘后约17点发布，17点前查当日会无数据，应传上一交易日",
 					},
 				},
 				Required: []string{"date"},
@@ -1752,7 +1768,7 @@ func Tools(tools []Tool) []Tool {
 		Type: "function",
 		Function: ToolFunction{
 			Name:        "GetLhbSeatDetail",
-			Description: "获取个股某交易日龙虎榜买5卖5席位明细（游资/机构买卖数据），含营业部名称、买卖金额、占总成交比例、席位类型识别（机构专用/北向通道/知名游资/普通营业部）及游资昵称标签",
+			Description: "获取个股某交易日龙虎榜买5卖5席位明细（游资/机构买卖数据），含营业部名称、买卖金额、占总成交比例、席位类型识别（机构专用/北向通道/知名游资/普通营业部）及游资昵称标签。龙虎榜在交易日收盘后约17点发布，查询当日须在17点后，17点前或非交易日请传最近一个已发布的交易日期",
 			Parameters: &FunctionParameters{
 				Type: "object",
 				Properties: map[string]any{
@@ -1762,10 +1778,69 @@ func Tools(tools []Tool) []Tool {
 					},
 					"date": map[string]any{
 						"type":        "string",
-						"description": "交易日期，格式：2026-03-28，默认今天",
+						"description": "交易日期，格式：2026-03-28。龙虎榜收盘后约17点发布，17点前查当日会无数据，应传上一交易日",
 					},
 				},
-				Required: []string{"stockCode"},
+				Required: []string{"stockCode", "date"},
+			},
+		},
+	})
+
+	tools = append(tools, Tool{
+		Type: "function",
+		Function: ToolFunction{
+			Name:        "GetBkFundFlowRank",
+			Description: "获取板块/概念资金流向主力净流入排名TOP榜（如板块/概念资金流入流出前20名）。支持行业板块与概念板块、净流入榜与净流出榜；查询当天资金流向、板块轮动、主力资金动向时使用。返回板块代码与名称，可用 GetBkConstituentStocks 进一步查看成分股",
+			Parameters: &FunctionParameters{
+				Type: "object",
+				Properties: map[string]any{
+					"boardType": map[string]any{
+						"type":        "string",
+						"description": "板块类型：industry=行业板块（默认），concept=概念板块，both=两者都查",
+					},
+					"direction": map[string]any{
+						"type":        "string",
+						"description": "方向：inflow=净流入榜，outflow=净流出榜，both=流入流出都查（默认）",
+					},
+					"date": map[string]any{
+						"type":        "string",
+						"description": "查询日期，格式：2026-09-08，为空取最新快照（非交易日自动回退最近交易日）",
+					},
+					"topN": map[string]any{
+						"type":        "number",
+						"description": "返回条数，默认20，最大100",
+					},
+				},
+			},
+		},
+	})
+
+	tools = append(tools, Tool{
+		Type: "function",
+		Function: ToolFunction{
+			Name:        "GetBkConstituentStocks",
+			Description: "获取板块/概念的成分股列表TOP N，支持按涨跌幅、量比、换手率、总市值、流通市值、主力净流入、主力净流入占比、成交额升序/降序排序（如某板块主力净流入前20的成分股、板块内涨幅榜/换手率榜/市值龙头）。输入板块代码（BK0475，可从 GetBkFundFlowRank 获取）或名称（如 银行、机器人概念）",
+			Parameters: &FunctionParameters{
+				Type: "object",
+				Properties: map[string]any{
+					"bkCodeOrName": map[string]any{
+						"type":        "string",
+						"description": "板块/概念代码或名称，如 BK0475、银行、机器人概念",
+					},
+					"sortBy": map[string]any{
+						"type":        "string",
+						"description": "排序字段：mainNetInflow=主力净流入（默认）、changePercent=涨跌幅、volumeRatio=量比、turnoverRate=换手率、totalMarketCap=总市值、flowMarketCap=流通市值、mainNetInflowPct=主力净流入占比、dealAmount=成交额",
+					},
+					"order": map[string]any{
+						"type":        "string",
+						"description": "排序方向：desc=降序（默认）、asc=升序",
+					},
+					"topN": map[string]any{
+						"type":        "number",
+						"description": "返回条数，默认20，最大50",
+					},
+				},
+				Required: []string{"bkCodeOrName"},
 			},
 		},
 	})
@@ -2537,7 +2612,7 @@ func Tools(tools []Tool) []Tool {
 				Properties: map[string]any{
 					"date": map[string]any{
 						"type":        "string",
-						"description": "查询日期，格式：2026-04-17，默认今天",
+						"description": "查询日期，格式：2026-04-17；留空自动回退到最近有数据的交易日（非交易日无数据）",
 					},
 				},
 			},
@@ -2554,7 +2629,7 @@ func Tools(tools []Tool) []Tool {
 				Properties: map[string]any{
 					"date": map[string]any{
 						"type":        "string",
-						"description": "查询日期，格式：2026-04-17，默认今天",
+						"description": "查询日期，格式：2026-04-17；留空自动回退到最近有数据的交易日（非交易日无数据）",
 					},
 				},
 			},
@@ -2571,7 +2646,7 @@ func Tools(tools []Tool) []Tool {
 				Properties: map[string]any{
 					"date": map[string]any{
 						"type":        "string",
-						"description": "查询日期，格式：2026-04-17，默认今天",
+						"description": "查询日期，格式：2026-04-17；留空自动回退到最近有数据的交易日（非交易日无数据）",
 					},
 				},
 			},
@@ -2588,7 +2663,7 @@ func Tools(tools []Tool) []Tool {
 				Properties: map[string]any{
 					"date": map[string]any{
 						"type":        "string",
-						"description": "查询日期，格式：2026-04-17，默认今天",
+						"description": "查询日期，格式：2026-04-17；留空自动回退到最近有数据的交易日（非交易日无数据）",
 					},
 				},
 			},
@@ -2860,6 +2935,8 @@ var dataToolGroupMap = map[string]dataToolGroup{
 	"GetStockBillboard":           dataToolGroupStockAnalysis,
 	"GetStockOperationDeptTrade":  dataToolGroupStockAnalysis,
 	"GetLhbSeatDetail":            dataToolGroupStockAnalysis,
+	"GetBkFundFlowRank":           dataToolGroupMoneyFlow,
+	"GetBkConstituentStocks":      dataToolGroupMoneyFlow,
 	"ComparableCompanyAnalysis":   dataToolGroupStockAnalysis,
 	"FinancialQA":                 dataToolGroupStockAnalysis,
 	"GetAIAnalysisContent":        dataToolGroupStockAnalysis,
@@ -3257,6 +3334,10 @@ func appendAgentParityTools(tools []Tool) []Tool {
 		Function: ToolFunction{
 			Name:        "GetStockGroups",
 			Description: "获取所有股票分组列表，以及每个分组下的股票代码。可用于查看分组结构、确认分组ID。",
+			Parameters: &FunctionParameters{
+				Type:       "object",
+				Properties: map[string]any{},
+			},
 		},
 	})
 	// 2. CreateStockGroup

@@ -77,6 +77,9 @@ func AutoMigrate() error {
 		&models.PolicyNews{},
 		&models.DailyReview{},
 		&models.MorningStrategy{},
+		&models.PromptBacktestTask{},
+		&models.PromptBacktestPick{},
+		&models.SignalRecord{},
 	); err != nil {
 		return fmt.Errorf("同步数据库表结构失败: %w", err)
 	}
